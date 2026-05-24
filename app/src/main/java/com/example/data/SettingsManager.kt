@@ -2,35 +2,59 @@ package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 class SettingsManager(context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences("next_notes_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = context.getSharedPreferences("app_settings_prefs", Context.MODE_PRIVATE)
 
     companion object {
-        const val KEY_THEME_MODE = "theme_mode" // 0: Light, 1: Dark, 2: AMOLED, 3: System
-        const val KEY_GEMINI_API_KEY = "gemini_api_key"
-        const val KEY_FONT_SIZE = "font_size" // 1.0f (عادي), 1.2f (كبير), 1.4f (كبير جداً)
-        const val KEY_AUTO_SAVE = "auto_save"
-        const val KEY_SORT_ORDER = "sort_order" // "updated_at" or "created_at" or "title"
+        private const val KEY_FONT_SIZE = "font_size_scale"
+        private const val KEY_THEME = "app_theme_mode"
+        private const val KEY_CATEGORIES = "categories_list_json"
+        private const val KEY_CUSTOM_API_KEY = "custom_gemini_api_key"
     }
 
-    var themeMode: Int
-        get() = prefs.getInt(KEY_THEME_MODE, 3)
-        set(value) = prefs.edit().putInt(KEY_THEME_MODE, value).apply()
+    fun getFontSizeScale(): String {
+        return prefs.getString(KEY_FONT_SIZE, "normal") ?: "normal"
+    }
 
-    var geminiApiKey: String
-        get() = prefs.getString(KEY_GEMINI_API_KEY, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_GEMINI_API_KEY, value).apply()
+    fun setFontSizeScale(scale: String) {
+        prefs.edit().putString(KEY_FONT_SIZE, scale).apply()
+    }
 
-    var fontSize: Float
-        get() = prefs.getFloat(KEY_FONT_SIZE, 1.0f)
-        set(value) = prefs.edit().putFloat(KEY_FONT_SIZE, value).apply()
+    fun getThemeMode(): String {
+        return prefs.getString(KEY_THEME, "system") ?: "system"
+    }
 
-    var isAutoSaveEnabled: Boolean
-        get() = prefs.getBoolean(KEY_AUTO_SAVE, true)
-        set(value) = prefs.edit().putBoolean(KEY_AUTO_SAVE, value).apply()
+    fun setThemeMode(mode: String) {
+        prefs.edit().putString(KEY_THEME, mode).apply()
+    }
 
-    var sortOrder: String
-        get() = prefs.getString(KEY_SORT_ORDER, "updated_at") ?: "updated_at"
-        set(value) = prefs.edit().putString(KEY_SORT_ORDER, value).apply()
+    fun getCustomApiKey(): String {
+        return prefs.getString(KEY_CUSTOM_API_KEY, "") ?: ""
+    }
+
+    fun setCustomApiKey(key: String) {
+        prefs.edit().putString(KEY_CUSTOM_API_KEY, key).apply()
+    }
+
+    fun getCategoriesList(): List<String> {
+        val jsonStr = prefs.getString(KEY_CATEGORIES, null)
+        if (jsonStr == null) {
+            val defaultList = listOf("عام", "عمل", "دراسة", "شخصي", "أفكار")
+            saveCategoriesList(defaultList)
+            return defaultList
+        }
+        return try {
+            Json.decodeFromString(jsonStr)
+        } catch (e: Exception) {
+            listOf("عام", "عمل", "دراسة", "شخصي", "أفكار")
+        }
+    }
+
+    fun saveCategoriesList(list: List<String>) {
+        val jsonStr = Json.encodeToString(list)
+        prefs.edit().putString(KEY_CATEGORIES, jsonStr).apply()
+    }
 }
