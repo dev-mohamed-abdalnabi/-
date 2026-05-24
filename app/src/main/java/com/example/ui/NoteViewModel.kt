@@ -1,210 +1,338 @@
 package com.example.ui
 
 import android.content.Context
-import android.widget.Toast
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.api.GeminiClient
 import com.example.data.Attachment
 import com.example.data.Note
 import com.example.data.NoteRepository
-import com.example.data.SettingsManager
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Locale
 
-class NoteViewModel(
-    private val repository: NoteRepository,
-    private val settingsManager: SettingsManager
-) : ViewModel() {
+enum class Screen {
+    LIST, VIEW, EDIT
+}
 
-    val allNotes: StateFlow<List<Note>> = repository.allNotes
+class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
+
+    // Main flows
+    private val _currentScreen = MutableStateFlow(Screen.LIST)
+    val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
+
+    private val _currentNote = MutableStateFlow<Note?>(null)
+    val currentNote: StateFlow<Note?> = _currentNote.asStateFlow()
+
+    // Editor fields
+    private val _editorTitle = MutableStateFlow("")
+    val editorTitle: StateFlow<String> = _editorTitle.asStateFlow()
+
+    private val _editorContent = MutableStateFlow("")
+    val editorContent: StateFlow<String> = _editorContent.asStateFlow()
+
+    private val _editorAttachments = MutableStateFlow<List<Attachment>>(emptyList())
+    val editorAttachments: StateFlow<List<Attachment>> = _editorAttachments.asStateFlow()
+
+    private val _editorIsPinned = MutableStateFlow(false)
+    val editorIsPinned: StateFlow<Boolean> = _editorIsPinned.asStateFlow()
+
+    private val _editorCategory = MutableStateFlow("عام")
+    val editorCategory: StateFlow<String> = _editorCategory.asStateFlow()
+
+    private val _editorColor = MutableStateFlow(0)
+    val editorColor: StateFlow<Int> = _editorColor.asStateFlow()
+
+    // Search query
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    // AI states
+    private val _aiResult = MutableStateFlow<String?>(null)
+    val aiResult: StateFlow<String?> = _aiResult.asStateFlow()
+
+    private val _aiResultTitle = MutableStateFlow("")
+    val aiResultTitle: StateFlow<String> = _aiResultTitle.asStateFlow()
+
+    private val _aiLoading = MutableStateFlow(false)
+    val aiLoading: StateFlow<Boolean> = _aiLoading.asStateFlow()
+
+    // Notes collected reactive flow, filtered by search query
+    val notesList: StateFlow<List<Note>> = repository.allNotes
+        .combine(_searchQuery) { notes, query ->
+            if (query.isBlank()) {
+                notes
+            } else {
+                notes.filter {
+                    it.title.contains(query, ignoreCase = true) ||
+                            it.content.contains(query, ignoreCase = true)
+                }
+            }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery = _searchQuery.asStateFlow()
-
-    private val _selectedNote = MutableStateFlow<Note?>(null)
-    val selectedNote = _selectedNote.asStateFlow()
-
-    // Editor states
-    val editorTitle = MutableStateFlow("")
-    val editorContent = MutableStateFlow("")
-    val editorAttachments = MutableStateFlow<List<Attachment>>(emptyList())
-    val editorIsPinned = MutableStateFlow(false)
-    val editorCategory = MutableStateFlow("عام")
-    val editorColor = MutableStateFlow(0)
-
-    // AI states
-    private val _aiResponseText = MutableStateFlow<String?>(null)
-    val aiResponseText = _aiResponseText.asStateFlow()
-
-    private val _aiLoading = MutableStateFlow(false)
-    val aiLoading = _aiLoading.asStateFlow()
-
-    // Chat / Q&A States
-    private val _chatMessages = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
-    val chatMessages = _chatMessages.asStateFlow()
-
-    private val _chatLoading = MutableStateFlow(false)
-    val chatLoading = _chatLoading.asStateFlow()
-
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
     }
 
-    fun selectNote(note: Note?) {
-        _selectedNote.value = note
-        note?.let {
-            editorTitle.value = it.title
-            editorContent.value = it.content
-            editorAttachments.value = it.attachments
-            editorIsPinned.value = it.isPinned
-            editorCategory.value = it.category
-            editorColor.value = it.color
-            _chatMessages.value = emptyList()
-            _aiResponseText.value = null
-        }
+    // Navigation and Action Handlers
+    fun navigateToList() {
+        _currentScreen.value = Screen.LIST
+        _currentNote.value = null
+        clearEditor()
     }
 
-    fun resetEditor() {
-        editorTitle.value = ""
-        editorContent.value = ""
-        editorAttachments.value = emptyList()
-        editorIsPinned.value = false
-        editorCategory.value = "عام"
-        editorColor.value = 0
-        _aiResponseText.value = null
-        _chatMessages.value = emptyList()
+    fun navigateToView(note: Note) {
+        _currentNote.value = note
+        _currentScreen.value = Screen.VIEW
     }
 
-    fun updateEditorColor(colorIndex: Int) {
-        editorColor.value = colorIndex
+    fun navigateToCreate() {
+        clearEditor()
+        _currentNote.value = null
+        _currentScreen.value = Screen.EDIT
     }
 
-    fun updateEditorCategory(categoryName: String) {
-        editorCategory.value = categoryName
+    fun navigateToEdit(note: Note) {
+        _currentNote.value = note
+        _editorTitle.value = note.title
+        _editorContent.value = note.content
+        _editorAttachments.value = deserializeAttachments(note.attachmentsString)
+        _editorIsPinned.value = note.isPinned
+        _editorCategory.value = note.category
+        _editorColor.value = note.color
+        _currentScreen.value = Screen.EDIT
+    }
+
+    private fun clearEditor() {
+        _editorTitle.value = ""
+        _editorContent.value = ""
+        _editorAttachments.value = emptyList()
+        _editorIsPinned.value = false
+        _editorCategory.value = "عام"
+        _editorColor.value = 0
+        _aiResult.value = null
+        _aiResultTitle.value = ""
+    }
+
+    fun updateEditorTitle(title: String) {
+        _editorTitle.value = title
+    }
+
+    fun updateEditorContent(content: String) {
+        _editorContent.value = content
     }
 
     fun toggleEditorPinned() {
-        editorIsPinned.value = !editorIsPinned.value
+        _editorIsPinned.value = !_editorIsPinned.value
     }
 
-    fun addAttachment(attachment: Attachment) {
-        editorAttachments.value = editorAttachments.value + attachment
+    fun updateEditorCategory(category: String) {
+        _editorCategory.value = category
+    }
+
+    fun updateEditorColor(color: Int) {
+        _editorColor.value = color
+    }
+
+    fun togglePinNote(note: Note) {
+        viewModelScope.launch {
+            val updatedNote = note.copy(isPinned = !note.isPinned, updatedAt = System.currentTimeMillis())
+            repository.insertNote(updatedNote)
+        }
+    }
+
+    // Attachments Handling
+    fun addAttachmentFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val attachment = getAttachmentFromUri(context, uri)
+            val currentList = _editorAttachments.value.toMutableList()
+            currentList.add(attachment)
+            _editorAttachments.value = currentList
+        }
     }
 
     fun removeAttachment(attachment: Attachment) {
-        editorAttachments.value = editorAttachments.value.filter { it.uriString != attachment.uriString }
+        val currentList = _editorAttachments.value.toMutableList()
+        currentList.remove(attachment)
+        _editorAttachments.value = currentList
     }
 
-    fun saveNote(onComplete: () -> Unit) {
-        viewModelScope.launch {
-            val title = editorTitle.value.trim().ifBlank { "ملاحظة بدون عنوان" }
-            val content = editorContent.value
-            val current = _selectedNote.value
+    private fun getAttachmentFromUri(context: Context, uri: Uri): Attachment {
+        var name = "مستند_مرفق"
+        var mimeType = "application/octet-stream"
 
-            if (current == null) {
-                val newNote = Note(
-                    title = title,
-                    content = content,
-                    isPinned = editorIsPinned.value,
-                    category = editorCategory.value,
-                    color = editorColor.value,
-                    attachments = editorAttachments.value
-                )
-                repository.insert(newNote)
-            } else {
-                val updatedNote = current.copy(
-                    title = title,
-                    content = content,
-                    dateModified = System.currentTimeMillis(),
-                    isPinned = editorIsPinned.value,
-                    category = editorCategory.value,
-                    color = editorColor.value,
-                    attachments = editorAttachments.value
-                )
-                repository.update(updatedNote)
-            }
-            resetEditor()
-            onComplete()
-        }
-    }
-
-    fun deleteSelectedNote(onComplete: () -> Unit) {
-        viewModelScope.launch {
-            val current = _selectedNote.value
-            if (current != null) {
-                repository.delete(current)
-                _selectedNote.value = null
-                resetEditor()
-            }
-            onComplete()
-        }
-    }
-
-    fun runAIFeature(context: Context, feature: GeminiClient.AIFeature, text: String) {
-        if (text.isBlank()) {
-            Toast.makeText(context, "الملاحظة فارغة! يرجى إضافة نص لمعالجته.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val customKey = settingsManager.getCustomApiKey()
-        viewModelScope.launch {
-            _aiLoading.value = true
-            _aiResponseText.value = "جاري تفعيل ذكاء المساعد لمعالجة الملاحظة..."
-            val result = GeminiClient.runFeature(customKey, feature, text)
-            _aiResponseText.value = result
-            _aiLoading.value = false
-
-            if (feature == GeminiClient.AIFeature.AUTO_CATEGORIZE) {
-                val cleanedCat = result.trim().replace(".", "").replace("\"", "")
-                if (cleanedCat.length < 20 && cleanedCat.isNotBlank()) {
-                    editorCategory.value = cleanedCat
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst() && nameIndex != -1) {
+                    name = cursor.getString(nameIndex)
                 }
             }
+            val type = context.contentResolver.getType(uri)
+            if (type != null) {
+                mimeType = type
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+
+        return Attachment(uri.toString(), name, mimeType)
     }
 
-    fun askCustomQuestion(context: Context, contextContent: String, question: String) {
-        if (question.isBlank()) return
-        
-        _chatMessages.value = _chatMessages.value + Pair(question, true)
-        
-        val customKey = settingsManager.getCustomApiKey()
+    private fun serializeAttachments(list: List<Attachment>): String {
+        return list.joinToString("\n") { it.toSerializedString() }
+    }
+
+    private fun deserializeAttachments(str: String): List<Attachment> {
+        if (str.isBlank()) return emptyList()
+        return str.split("\n")
+            .mapNotNull { Attachment.fromSerializedString(it) }
+    }
+
+    // Save, Update, Delete Notes
+    fun saveNote() {
         viewModelScope.launch {
-            _chatLoading.value = true
-            val reply = GeminiClient.askCustomQuestion(customKey, contextContent, question)
-            _chatMessages.value = _chatMessages.value + Pair(reply, false)
-            _chatLoading.value = false
+            val title = _editorTitle.value.trim().ifBlank { 
+                "ملاحظة ذكية " + System.currentTimeMillis().toString().takeLast(4)
+            }
+            val content = _editorContent.value
+            val attachmentsStr = serializeAttachments(_editorAttachments.value)
+            
+            val noteToSave = _currentNote.value?.copy(
+                title = title,
+                content = content,
+                attachmentsString = attachmentsStr,
+                updatedAt = System.currentTimeMillis(),
+                isPinned = _editorIsPinned.value,
+                category = _editorCategory.value,
+                color = _editorColor.value
+            ) ?: Note(
+                title = title,
+                content = content,
+                attachmentsString = attachmentsStr,
+                isPinned = _editorIsPinned.value,
+                category = _editorCategory.value,
+                color = _editorColor.value
+            )
+
+            val savedId = repository.insertNote(noteToSave)
+            
+            // Navigate back appropriately
+            _currentScreen.value = Screen.LIST
+            _currentNote.value = null
+            clearEditor()
         }
     }
 
-    fun clearAiResponse() {
-        _aiResponseText.value = null
+    fun deleteNoteById(id: Int) {
+        viewModelScope.launch {
+            repository.deleteNoteById(id)
+            navigateToList()
+        }
     }
 
-    fun clearChat() {
-        _chatMessages.value = emptyList()
+    // AI Features Core API Integration
+    fun runAIFeature(context: Context, feature: GeminiClient.AIFeature, noteContent: String) {
+        if (noteContent.isBlank()) {
+            _aiResultTitle.value = "تنبيه"
+            _aiResult.value = "يرجى كتابة بعض السطور في الملاحظة أولاً لكي يستطيع الذكاء الاصطناعي معالجتها وفهم ثناياها."
+            return
+        }
+
+        viewModelScope.launch {
+            _aiLoading.value = true
+            _aiResultTitle.value = feature.titleArabic
+            try {
+                val response = GeminiClient.callGemini(context, feature, noteContent)
+                _aiResult.value = response
+            } catch (e: Exception) {
+                _aiResult.value = "حدث خطأ غير متوقع أثناء المعالجة: ${e.localizedMessage}"
+            } finally {
+                _aiLoading.value = false
+            }
+        }
+    }
+
+    // Ask custom AI Question (100% interactive Q&A feature)
+    fun askCustomQuestion(context: Context, noteContent: String, question: String) {
+        if (noteContent.isBlank()) {
+            _aiResultTitle.value = "سؤال ذكي"
+            _aiResult.value = "الملاحظة فارغة! يرجى ملؤها ببعض البيانات ثم اسألني ما تريد."
+            return
+        }
+        if (question.isBlank()) return
+
+        viewModelScope.launch {
+            _aiLoading.value = true
+            _aiResultTitle.value = "رد الذكاء الاصطناعي على سؤالك"
+            try {
+                // Synthesize custom template
+                val customFeature = GeminiClient.AIFeature.EXPLAIN_CONCEPTS
+                val combinedPrompt = "بناءً على نص الملاحظة التالي تفضل بالإجابة الإحترافية على هذا السؤال: \n«$question»\n\nنص الملاحظ الموجه للتحليل والبحث:\n$noteContent"
+                
+                // If online, call GeminiClient API (which now embeds a default secure key)
+                val response = if (GeminiClient.isOnline(context)) {
+                    GeminiClient.callGemini(context, customFeature, combinedPrompt)
+                } else {
+                    simulateLocalSearch(noteContent, question)
+                }
+                
+                _aiResult.value = response
+            } catch (e: Exception) {
+                _aiResult.value = "فشل المعالجة المحلية للأسئلة: ${e.localizedMessage}"
+            } finally {
+                _aiLoading.value = false
+            }
+        }
+    }
+
+    private fun simulateLocalSearch(noteText: String, question: String): String {
+        val normalizedQuestion = question.replace(Regex("[.,;:\"'?؟!«»]"), "").lowercase(Locale.ROOT)
+        val queryWords = normalizedQuestion.split(" ").filter { it.length > 3 }
+        
+        val sentences = noteText.split(Regex("[.\n?!]")).filter { it.isNotBlank() }
+        val matchedSentences = mutableListOf<String>()
+
+        sentences.forEach { sentence ->
+            val matched = queryWords.any { sentence.lowercase(Locale.ROOT).contains(it) }
+            if (matched) {
+                matchedSentences.add("• " + sentence.trim())
+            }
+        }
+
+        return if (matchedSentences.isNotEmpty()) {
+            "⚡ [مساعد البحث المحلي - العمل بدون إنترنت]\n\n" +
+                    "وجدتُ هذه الجمل والسطور الأكثر ملاءمة لسؤالك داخل الملاحظة:\n\n" +
+                    matchedSentences.distinct().joinToString("\n\n") +
+                    "\n\n⚙️ ننصح بالاتصال بالإنترنت لتشغيل الموديل الكامل والحصول على رد صياغي معقد."
+        } else {
+            "⚡ [مساعد المحتوى المحلي - العمل بدون إنترنت]\n\n" +
+                    "لم أعثر على مطابقة مباشرة في مذكرتك للمصطلحات: (${queryWords.joinToString(", ")}).\n\n" +
+                    "إليك الجزء الأول من فكرتك للمساعدة:\n" +
+                    "«" + noteText.take(150) + "...»"
+        }
+    }
+
+    fun clearAiResult() {
+        _aiResult.value = null
+        _aiResultTitle.value = ""
     }
 }
 
-class NoteViewModelFactory(
-    private val repository: NoteRepository,
-    private val settingsManager: SettingsManager
-) : ViewModelProvider.Factory {
+class NoteViewModelFactory(private val repository: NoteRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(NoteViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return NoteViewModel(repository, settingsManager) as T
+            return NoteViewModel(repository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
