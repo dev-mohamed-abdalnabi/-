@@ -10,7 +10,9 @@ data class Note(
     val content: String,
     val attachmentsString: String = "", // Format: uri|name|mimeType, separated by '\n' or ','
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val isPinned: Boolean = false,
+    val category: String = "عام"
 )
 
 data class Attachment(

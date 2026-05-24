@@ -67,10 +67,11 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            // Local state for user's theme selection overrides
-            var forceDarkTheme by rememberSaveable { mutableStateOf(false) }
+            val context = LocalContext.current
+            val settingsManager = remember { com.example.data.SettingsManager(context) }
+            var themeMode by remember { mutableStateOf(settingsManager.themeMode) }
 
-            MyApplicationTheme(darkTheme = forceDarkTheme) {
+            MyApplicationTheme(themeMode = themeMode) {
                 // Ensure layout fits RTL (Arabic standard right-to-left alignment)
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Surface(
@@ -79,8 +80,12 @@ class MainActivity : ComponentActivity() {
                     ) {
                         MainAppContent(
                             viewModel = viewModel,
-                            forceDarkTheme = forceDarkTheme,
-                            onThemeToggle = { forceDarkTheme = !forceDarkTheme }
+                            themeMode = themeMode,
+                            onThemeChange = { newMode ->
+                                settingsManager.themeMode = newMode
+                                themeMode = newMode
+                            },
+                            settingsManager = settingsManager
                         )
                     }
                 }
@@ -93,8 +98,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppContent(
     viewModel: NoteViewModel,
-    forceDarkTheme: Boolean,
-    onThemeToggle: () -> Unit
+    themeMode: Int,
+    onThemeChange: (Int) -> Unit,
+    settingsManager: com.example.data.SettingsManager
 ) {
     val context = LocalContext.current
     val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
@@ -127,8 +133,9 @@ fun MainAppContent(
                     viewModel = viewModel,
                     notesList = notesList,
                     searchQuery = searchQuery,
-                    forceDarkTheme = forceDarkTheme,
-                    onThemeToggle = onThemeToggle,
+                    themeMode = themeMode,
+                    onThemeChange = onThemeChange,
+                    settingsManager = settingsManager,
                     onNoteClick = { viewModel.navigateToView(it) },
                     onCreateClick = { viewModel.navigateToCreate() }
                 )
@@ -138,6 +145,7 @@ fun MainAppContent(
                     NoteViewerScreen(
                         viewModel = viewModel,
                         note = note,
+                        settingsManager = settingsManager,
                         onBack = { viewModel.navigateToList() },
                         onEdit = { viewModel.navigateToEdit(note) }
                     )
@@ -262,14 +270,40 @@ fun NotesListScreen(
     viewModel: NoteViewModel,
     notesList: List<Note>,
     searchQuery: String,
-    forceDarkTheme: Boolean,
-    onThemeToggle: () -> Unit,
+    themeMode: Int,
+    onThemeChange: (Int) -> Unit,
+    settingsManager: com.example.data.SettingsManager,
     onNoteClick: (Note) -> Unit,
     onCreateClick: () -> Unit
 ) {
     val context = LocalContext.current
     var showAiHubSheet by remember { mutableStateOf(false) }
-    var showAboutDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
+    // Categories filter state (Defaults to "الكل" - All)
+    var selectedCategoryFilter by remember { mutableStateOf("الكل") }
+
+    // Reactively compute sorted and filtered list of notes
+    val sortedAndFilteredNotes = remember(notesList, selectedCategoryFilter, settingsManager.sortOrder) {
+        val filtered = if (selectedCategoryFilter == "الكل") {
+            notesList
+        } else {
+            notesList.filter { it.category == selectedCategoryFilter }
+        }
+
+        filtered.sortedWith { n1, n2 ->
+            // First: pins stay on top
+            if (n1.isPinned && !n2.isPinned) return@sortedWith -1
+            if (!n1.isPinned && n2.isPinned) return@sortedWith 1
+
+            // Second: Sort according to user preferences
+            when (settingsManager.sortOrder) {
+                "created_at" -> n2.createdAt.compareTo(n1.createdAt) // Creation date descending
+                "title" -> n1.title.compareTo(n2.title, ignoreCase = true) // Title ascending
+                else -> n2.updatedAt.compareTo(n1.updatedAt) // Update date descending (default)
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -289,16 +323,11 @@ fun NotesListScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showAboutDialog = true }) {
+                    IconButton(onClick = { showSettingsDialog = true }) {
                         Icon(
-                            imageVector = Icons.Filled.Info,
-                            contentDescription = "عن التطبيق"
-                        )
-                    }
-                    IconButton(onClick = onThemeToggle) {
-                        Icon(
-                            imageVector = if (forceDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                            contentDescription = "تغيير المظهر"
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "ترس الإعدادات والتخصيص",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     IconButton(onClick = { showAiHubSheet = true }) {
@@ -346,7 +375,7 @@ fun NotesListScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 4.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -354,6 +383,32 @@ fun NotesListScreen(
                 ),
                 singleLine = true
             )
+
+            // Categories Horizontal Filter Row
+            val categoriesList = listOf("الكل", "عام", "عمل", "دراسة", "شخصي", "أفكار")
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp)
+            ) {
+                items(categoriesList) { cat ->
+                    val isSelected = selectedCategoryFilter == cat
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { selectedCategoryFilter = cat },
+                        label = { Text(cat) },
+                        leadingIcon = if (isSelected) {
+                            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                }
+            }
 
             // Dynamic internet status indicator HUD banner
             val isOnline = GeminiClient.isOnline(context)
@@ -380,9 +435,9 @@ fun NotesListScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            if (notesList.isEmpty()) {
+            if (sortedAndFilteredNotes.isEmpty()) {
                 // Polished illustrative empty state
                 Box(
                     modifier = Modifier
@@ -408,12 +463,12 @@ fun NotesListScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (searchQuery.isNotEmpty()) "استخدم كلمات مختلفة في البحث." else "ابدأ الآن بكتابة أفكارك وملاحظاتك لترتيبها باستخدام الذكاء الاصطناعي.",
+                            text = if (searchQuery.isNotEmpty()) "استخدم كلمات مختلفة في البحث أو غير المجموعة المفلترة." else "ابدأ الآن بكتابة أفكارك وملاحظاتك لترتيبها باستخدام الذكاء الاصطناعي.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
-                        if (searchQuery.isEmpty()) {
+                        if (searchQuery.isEmpty() && selectedCategoryFilter == "الكل") {
                             Button(onClick = onCreateClick) {
                                 Icon(Icons.Filled.Create, contentDescription = "أول ملاحظة")
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -432,7 +487,7 @@ fun NotesListScreen(
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    items(notesList, key = { it.id }) { note ->
+                    items(sortedAndFilteredNotes, key = { it.id }) { note ->
                         NoteCard(note = note, onClick = { onNoteClick(note) })
                     }
                 }
@@ -440,31 +495,269 @@ fun NotesListScreen(
         }
     }
 
-    // About Application Dialog
-    if (showAboutDialog) {
+    // Complete App Settings Dialog
+    if (showSettingsDialog) {
         AlertDialog(
-            onDismissRequest = { showAboutDialog = false },
-            title = { Text("عن التطبيق") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("تم التطوير بواسطة flow studio")
-                    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+            onDismissRequest = { showSettingsDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "الإعدادات",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                     Text(
-                        text = "https://flow-com.vercel.app/",
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable {
-                            try {
-                                uriHandler.openUri("https://flow-com.vercel.app/")
-                            } catch (e: Exception) {
-                                // ignore
-                            }
-                        }
+                        text = "الإعدادات والتخصيص",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
                     )
                 }
             },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // 1. Appearance Section
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "🎨 العرض والتخصيص",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+
+                                // Theme Option Selector
+                                Text("مظهر التطبيق الحالي:", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
+                                val themeOptions = listOf("الوضع الفاتح ☀️", "الوضع الداكن 🌙", "وضع أموليد AMOLED 🖤", "اتباع النظام 📱")
+                                themeOptions.forEachIndexed { index, op ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onThemeChange(index) }
+                                            .padding(vertical = 4.dp)
+                                    ) {
+                                        RadioButton(
+                                            selected = (themeMode == index),
+                                            onClick = { onThemeChange(index) }
+                                        )
+                                        Text(text = op, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+
+                                Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+                                // Font Size settings
+                                Text("حجم خط الملاحظة داخل التفاصيل:", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
+                                val fontSizeOptions = listOf("صغير جداً", "متوسط مناسب", "كبير وواضح", "كبير جداً")
+                                val fontScaleValues = listOf(0.8f, 1.0f, 1.2f, 1.4f)
+                                var tempFontSize by remember { mutableStateOf(settingsManager.fontSize) }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    fontSizeOptions.forEachIndexed { fIdx, fOp ->
+                                        val scale = fontScaleValues[fIdx]
+                                        val isSelectedF = tempFontSize == scale
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(
+                                                    if (isSelectedF) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.surfaceVariant
+                                                )
+                                                .clickable {
+                                                    settingsManager.fontSize = scale
+                                                    tempFontSize = scale
+                                                }
+                                                .padding(vertical = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = fOp,
+                                                color = if (isSelectedF) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. AI Key Settings Section
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "🤖 إعدادات الذكاء الاصطناعي (Gemini)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                Text(
+                                    text = "إذا واجهت بطئاً أو تعليقاً في الذكاء الاصطناعي عبر الشبكة، يمكنك إدخال مفتاح Gemini API الخاص بك لتشغيله بشكل فوري وحصري:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
+                                var keyText by remember { mutableStateOf(settingsManager.geminiApiKey) }
+                                OutlinedTextField(
+                                    value = keyText,
+                                    onValueChange = {
+                                        keyText = it
+                                        settingsManager.geminiApiKey = it
+                                    },
+                                    placeholder = { Text("أدخل مفتاح AI الخاص بك هنا...") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. User Preferences Section
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "⚙️ تفضيلات المفكرة",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+
+                                 // Auto-save toggle
+                                var autoSaveEnabled by remember { mutableStateOf(settingsManager.isAutoSaveEnabled) }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            autoSaveEnabled = !autoSaveEnabled
+                                            settingsManager.isAutoSaveEnabled = autoSaveEnabled
+                                        }
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Text("الحفظ التلقائي للمسودات والملاحظات", style = MaterialTheme.typography.bodyMedium)
+                                    Switch(
+                                        checked = autoSaveEnabled,
+                                        onCheckedChange = {
+                                            autoSaveEnabled = it
+                                            settingsManager.isAutoSaveEnabled = it
+                                        }
+                                    )
+                                }
+
+                                Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+                                // Sorting Preferences
+                                Text("ترتيب الملاحظات حسب المفضل:", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
+                                val sortKeys = listOf("updated_at", "created_at", "title")
+                                val sortLabels = listOf("الأحدث تعديلاً (افتراضي)", "الأحدث إنشاءً وتدويناً", "الأبجدية (اسم العنوان)")
+                                var tempSort by remember { mutableStateOf(settingsManager.sortOrder) }
+                                sortKeys.forEachIndexed { sIdx, sKey ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                settingsManager.sortOrder = sKey
+                                                tempSort = sKey
+                                            }
+                                            .padding(vertical = 4.dp)
+                                    ) {
+                                        RadioButton(
+                                            selected = (tempSort == sKey),
+                                            onClick = {
+                                                settingsManager.sortOrder = sKey
+                                                tempSort = sKey
+                                            }
+                                        )
+                                        Text(text = sortLabels[sIdx], style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. About Developer Section
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "🌐 بطل التطبيق ومطوره",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                Text(
+                                    text = "اسم التطبيق الرسمي: Next",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "تم التطوير بواسطة flow studio",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+
+                                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier
+                                        .padding(top = 8.dp)
+                                        .clickable {
+                                            try {
+                                                uriHandler.openUri("https://flow-com.vercel.app/")
+                                            } catch (e: Exception) {
+                                                // ignore
+                                            }
+                                        }
+                                ) {
+                                    Icon(Icons.Filled.Link, contentDescription = "رابط", tint = MaterialTheme.colorScheme.primary)
+                                    Text(
+                                        text = "https://flow-com.vercel.app/",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = { showAboutDialog = false }) {
-                    Text("إغلاق")
+                Button(onClick = { showSettingsDialog = false }) {
+                    Text("تم وحفظ الإعدادات")
                 }
             }
         )
@@ -596,14 +889,29 @@ fun NoteCard(note: Note, onClick: () -> Unit) {
             }
 
             Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = note.title,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = note.title,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (note.isPinned) {
+                        Icon(
+                            imageVector = Icons.Filled.PushPin,
+                            contentDescription = "مُثبّتة",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 
                 // Strip HTML formatting on card snippet for a cleaner look
@@ -629,11 +937,30 @@ fun NoteCard(note: Note, onClick: () -> Unit) {
                         val sdf = SimpleDateFormat("dd MMM, hh:mm a", Locale("ar"))
                         sdf.format(Date(note.updatedAt))
                     }
-                    Text(
-                        text = dateFormatted,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = dateFormatted,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        // Mini category badge capsule
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = note.category.ifBlank { "عام" },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
 
                     // Attachments indicators
                     if (attachments.isNotEmpty()) {
@@ -671,6 +998,7 @@ fun NoteCard(note: Note, onClick: () -> Unit) {
 fun NoteViewerScreen(
     viewModel: NoteViewModel,
     note: Note,
+    settingsManager: com.example.data.SettingsManager,
     onBack: () -> Unit,
     onEdit: () -> Unit
 ) {
@@ -755,7 +1083,7 @@ fun NoteViewerScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             // Render Content using custom parsed code block system
-                            NoteContentViewer(content = note.content)
+                            NoteContentViewer(content = note.content, fontSizeScale = settingsManager.fontSize)
                         }
                     }
                 }
@@ -982,6 +1310,8 @@ fun NoteEditorScreen(
     onSave: () -> Unit
 ) {
     val context = LocalContext.current
+    val editorIsPinned by viewModel.editorIsPinned.collectAsStateWithLifecycle()
+    val editorCategory by viewModel.editorCategory.collectAsStateWithLifecycle()
 
     // Launch Document/File Pickers
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -1053,6 +1383,64 @@ fun NoteEditorScreen(
                     focusedBorderColor = MaterialTheme.colorScheme.primary
                 )
             )
+
+            // Pin & Category Selector Row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Pin toggle chip
+                FilterChip(
+                    selected = editorIsPinned,
+                    onClick = { viewModel.toggleEditorPinned() },
+                    label = { Text(if (editorIsPinned) "مُثبّتة 📌" else "تثبيت الملاحظة") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                // Text label info
+                Text("المجموعة:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                
+                // Dropdown Category Selector
+                val expanded = remember { mutableStateOf(false) }
+                Box {
+                    Button(
+                        onClick = { expanded.value = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text(editorCategory, style = MaterialTheme.typography.bodyMedium)
+                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                    
+                    DropdownMenu(
+                        expanded = expanded.value,
+                        onDismissRequest = { expanded.value = false }
+                    ) {
+                        val editorCategories = listOf("عام", "عمل", "دراسة", "شخصي", "أفكار")
+                        editorCategories.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat) },
+                                onClick = {
+                                    viewModel.updateEditorCategory(cat)
+                                    expanded.value = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
             // Writing and media utilities toolbar
             Row(
@@ -1185,8 +1573,10 @@ fun AttachmentEditorCard(attachment: Attachment, onRemove: () -> Unit) {
 // 4. RICH SYNTAX-HIGHLIGHTED CONTENT VIEWER
 // ==========================================
 @Composable
-fun NoteContentViewer(content: String) {
+fun NoteContentViewer(content: String, fontSizeScale: Float = 1.0f) {
     val parts = remember(content) { parseContentWithCodeBlocks(content) }
+    val textSize = (15 * fontSizeScale).sp
+    val itemLineHeight = (24 * fontSizeScale).sp
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1194,13 +1584,13 @@ fun NoteContentViewer(content: String) {
     ) {
         parts.forEach { part ->
             if (part.isCode) {
-                CodeBlockDisplay(code = part.text, language = part.language)
+                CodeBlockDisplay(code = part.text, language = part.language, fontSizeScale = fontSizeScale)
             } else {
                 Text(
                     text = part.text,
-                    style = MaterialTheme.typography.bodyLarge,
+                    fontSize = textSize,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 26.sp
+                    lineHeight = itemLineHeight
                 )
             }
         }
@@ -1244,10 +1634,12 @@ fun parseContentWithCodeBlocks(text: String): List<ContentPart> {
 
 // Syntax-Highlighted rounded Code box
 @Composable
-fun CodeBlockDisplay(code: String, language: String) {
+fun CodeBlockDisplay(code: String, language: String, fontSizeScale: Float = 1.0f) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val isDark = isSystemInDarkTheme()
+    val codeTextSize = (14 * fontSizeScale).sp
+    val codeLineHeight = (21 * fontSizeScale).sp
 
     Card(
         colors = CardDefaults.cardColors(
@@ -1294,8 +1686,8 @@ fun CodeBlockDisplay(code: String, language: String) {
                 text = code,
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFFF8F8F2),
-                style = MaterialTheme.typography.bodyMedium,
-                lineHeight = 22.sp,
+                fontSize = codeTextSize,
+                lineHeight = codeLineHeight,
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
                     .fillMaxWidth()

@@ -1,5 +1,5 @@
 {
-  "name": "الملاحظات الذكية",
+  "name": "Next",
   "description": "تطبيق ملاحظات ذكي متكامل بـ 15 ميزة ذكاء اصطناعي مفيدة ودعم كامل للعمل بدون إنترنت وحفظ الملفات والأكواد.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

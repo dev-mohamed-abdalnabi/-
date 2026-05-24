@@ -178,7 +178,8 @@ object GeminiClient {
             return@withContext simulateOfflineAI(feature, plainText)
         }
 
-        val apiKey = BuildConfig.GEMINI_API_KEY
+        val customApiKey = com.example.data.SettingsManager(context).geminiApiKey
+        val apiKey = if (customApiKey.isNotBlank()) customApiKey else com.example.BuildConfig.GEMINI_API_KEY
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
             Log.w(TAG, "API Key is missing or default. Falling back to offline simulation.")
             return@withContext simulateOfflineAI(feature, plainText) + "\n\n(❗️ تنبيه: تم توليد النتيجة محلياً لعدم إعداد مفتاح API الخاص بـ Gemini في إعدادات التطبيق)"
@@ -281,186 +282,179 @@ object GeminiClient {
             return "📝 النص قصير جداً! يرجى إضافة كلمات ومحتوى كافٍ في الملاحظة لتتم المعالجة بنجاح."
         }
 
-        val offlinePrefix = "⚡ [وضع المعالجة المحلية - متصل بـ Offline AI Engine v1.2]\n\n"
+        val offlinePrefix = "⚡ [مـعـالـج الـذكـاء الاصـطـنـاعـي الـمـحـلـي الذكي v2.0]\n\n"
 
         return when (feature) {
             AIFeature.SUMMARIZE -> {
                 val summaryBullets = mutableListOf<String>()
-                // Strategy: Extract first non-trivial sentence of first 4 paragraphs
-                if (lines.isNotEmpty()) {
-                    lines.take(5).forEach { line ->
-                        if (line.trim().length > 10) {
-                            summaryBullets.add("• " + line.trim().take(70).trim() + "...")
-                        }
+                lines.take(6).forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.length > 15) {
+                        summaryBullets.add("• " + trimmed.take(90).trim() + (if (trimmed.length > 90) "..." else ""))
                     }
                 }
                 if (summaryBullets.isEmpty()) {
                     summaryBullets.add("• " + text.take(150) + "...")
                 }
-                offlinePrefix + "أفكار أساسية من ملاحظتك:\n" + summaryBullets.joinToString("\n") +
-                        "\n\n⚙️ تقدير إحصائي محلي: تحتوي مسودتك على ${words.size} كلمة و ${text.length} حرفاً ويُنصح بترتيبها في فقرات منسقة."
+                offlinePrefix + "📌 **خلاصة أهم النقاط المستخلصة محلياً:**\n\n" + summaryBullets.joinToString("\n") +
+                        "\n\n📊 **تحليل المسودة:** تحتوي ملاحظتك على ${words.size} كلمة ومكتوبة بذكاء وتنسيق سلس."
             }
 
             AIFeature.ACTION_ITEMS -> {
                 val actions = mutableListOf<String>()
-                // Scan for action trigger words in Arabic/English
-                val triggers = listOf("يجب", "افعل", "قوم", "تجهيز", "شراء", "كتابة", "عمل", "ضروري", "تحضير", "تعديل", "todo", "task", "must", "prepare")
+                val triggers = listOf("يجب", "افعل", "قوم", "تجهيز", "شراء", "كتابة", "عمل", "ضروري", "تحضير", "تعديل", "دراسة", "مراجعة", "تطوير", "todo", "task")
                 lines.forEach { line ->
-                    val matched = triggers.any { line.lowercase(Locale.ROOT).contains(it) }
-                    if (matched && line.length > 8) {
-                        actions.add("[ ] " + line.trim())
+                    val trimmed = line.trim()
+                    val hasTrigger = triggers.any { trimmed.lowercase(Locale.ROOT).contains(it) }
+                    if (hasTrigger && trimmed.length > 10) {
+                        actions.add("⬜ **مهمة:** " + trimmed)
                     }
                 }
                 if (actions.isEmpty()) {
-                    // Extract sentences or make custom tasks if none found
-                    actions.add("[ ] دراسة ومراجعة الفكرة الرئيسية: \"" + (lines.firstOrNull()?.take(50) ?: "الفكرة العامة") + "\"")
-                    actions.add("[ ] توثيق السطور الهامة وتنظيم المسودة بشكل منهجي.")
-                    actions.add("[ ] كتابة ملحق إضافي يخص الموضوع.")
+                    actions.add("⬜ **مهمة:** مراجعة وبحث الأفكار المستخلصة في المذكرة: \"" + (lines.firstOrNull()?.take(40) ?: "الموضوع الحالي") + "\"")
+                    actions.add("⬜ **مهمة:** تدقيق الأجزاء العملية المستهدفون.")
+                    actions.add("⬜ **مهمة:** تنظيم وهيكلة مخرجات العمل لدعم اتخاذ القرار.")
                 }
-                offlinePrefix + "المهام والقرارات المستخلصة (Todo Task List):\n" + actions.joinToString("\n")
+                offlinePrefix + "🎯 **توصيات المهام المستخلصة والقابلة للتنفيذ:**\n\n" + actions.joinToString("\n")
             }
 
             AIFeature.GENERATE_TITLE -> {
+                val nouns = listOf("دراسة", "مفكرة", "تقرير", "خطة", "أفكار", "مشروع", "تحليل", "مستند")
+                val keyNoun = nouns.firstOrNull { text.contains(it) } ?: "مفكرة"
                 val candidate = lines.firstOrNull()?.trim() ?: "ملاحظة ذكية جديدة"
-                val finalTitle = if (candidate.length <= 40) candidate else candidate.take(35) + "..."
-                offlinePrefix + "العنوان الذكي المقترح:\n✨ \"$finalTitle\""
+                val cleanedCandidate = candidate.replace(Regex("[#.*?:!«»]"), "").take(30)
+                offlinePrefix + "✨ **العنوان المقترح بذكاء:**\n\n👉 \"$keyNoun: $cleanedCandidate\""
             }
 
             AIFeature.EXPLAIN_CONCEPTS -> {
-                val highlightedConcepts = mutableListOf<String>()
-                // Scan for long nouns or special capitalized words
-                val arabicApostropheOrQuotes = Regex("['\"«»]([^'\r\n\"«»]{3,20})['\"«»]")
-                val matches = arabicApostropheOrQuotes.findAll(text)
-                matches.forEach { highlightedConcepts.add(it.groupValues[1]) }
-
-                var explanation = ""
-                if (highlightedConcepts.isNotEmpty()) {
-                    explanation = "تحليل محلي للمصطلحات والكلمات المفتاحية البارزة:\n"
-                    highlightedConcepts.distinct().forEach { concept ->
-                        explanation += "💡 **$concept**: تشير البيانات المحلية إلى أن هذا المصطلح يمثل ركيزة في سياق مذكرتك ويُنصح بتفسيره بالبحث تالياً.\n"
+                val dictionary = mapOf(
+                    "برمج" to "💻 **البرمجة والتطوير:** صياغة وبناء وتطوير البرمجيات والمنظومات التقنية بلغات متقدمة لتعليم الآلة وتسهيل الحياة.",
+                    "كود" to "🧩 **الأكواد البرمجية (Source Code):** السطور البرمجية المكتوبة بأسلوب دلالي دقيق لبناء منطق التحكم في التطبيقات.",
+                    "ذكاء" to "🧠 **الذكاء الاصطناعي (AI):** فرع متقدم يحاكي القدرة البشرية على فهم وتحليل المعلومات واتخاذ القرار التلقائي بمرونة عالية.",
+                    "قاعدة" to "🗄️ **قواعد البيانات الحفظية (Database):** منظومة تقنية فائقة الترتيب لحفظ السجلات وقراءتها دون ضياع للبيانات أو تأخر في الاتصال.",
+                    "ويب" to "🌐 **تطبيقات الويب والمواقع:** منصات تفاعلية تعمل عبر المتصفحات لتزويد المستخدمين بالخدمات الفورية من أي مكان.",
+                    "تصميم" to "🎨 **واجهة وتجربة المستخدم (UI/UX):** تصميم وتخطيط جماليات التطبيق وتسهيل تفاعلات المستخدم لراحة العين والتشغيل الأسهل.",
+                    "كوتلن" to "🚀 **لغة كوتلن (Kotlin):** اللغة البرمجية العصرية الرسمية المدعومة من جوجل لتطوير تطبيقات الأندرويد فائقة الأداء.",
+                    "أندرويد" to "📱 **نظام تشغيل أندرويد (Android):** البيئة التشغيلية المفتوحة والأشهر عالمياً المشغلة للهواتف الذكية والتطبيقات."
+                )
+                val matches = mutableListOf<String>()
+                dictionary.forEach { (key, definition) ->
+                    if (text.lowercase(Locale.ROOT).contains(key)) {
+                        matches.add(definition)
                     }
+                }
+                val explanation = if (matches.isNotEmpty()) {
+                    "📌 **شرح للمفاهيم المكتشفة في ملاحظتك:**\n\n" + matches.joinToString("\n\n")
                 } else {
-                    explanation = "💡 تشير الفكرة الرئيسية للموضوع الحالي إلى تفرعات هامة ومصطلحات ترتبط بـ: " +
-                            (words.take(4).joinToString(", ") { "\"$it\"" }) + ".\n" +
-                            "تعتمد هذه الأفكار على موازنات عملية وتتابع منطقي يتجلى في أسلوب سردك للملاحظة."
+                    "📌 **تحليل المفاهيم:**\n\n💡 يدور النص حول موضوع رئيسي وهو: **\"" + (lines.firstOrNull()?.take(50) ?: "تحليل محتوى") + "\"**. الترابط اللفظي في مسودتك ممتاز ويحتوي على الكلمات الدالة (" + words.take(4).joinToString(", ") + ") التي تؤسس لإطار عمل قوي ومتماسك في هذا المبحث."
                 }
                 offlinePrefix + explanation
             }
 
             AIFeature.TONE_PROFESSIONAL -> {
-                offlinePrefix + "صياغة احترافية رسمية لبيانكم الكريم:\n\n" +
-                        "«نحيطكم علماً بأنه قد تم تنقيح وتحرير النص التالي لأغراض المعاملات والتوثيق الرسمي:\n" +
-                        text + "\n»"
+                val refined = text.split("\n").joinToString("\n") { line ->
+                    if (line.trim().length > 10) "تشير السجلات الموقرة إلى أن: { " + line.trim() + " }" else line
+                }
+                offlinePrefix + "💼 **إعادة صياغة رسمية لرجال الأعمال والشركات:**\n\n«نحيط سعادتكم علماً بأنه قد تم فحص ومراجعة الوثيقة وترقيتها لتوافق المعايير المهنية المعتمدة:\n\n$refined\n\nتفضلوا بقبول فائق الاحترام والتقدير.»"
             }
 
             AIFeature.GRAMMAR -> {
-                // Apply a few offline common Arabic spelling fixes!
                 var cleaned = text
                     .replace("ان ", "أن ")
                     .replace("الى ", "إلى ")
                     .replace(" ه ", "ـه ")
-                    .replace("\\s+".toRegex(), " ")
-                offlinePrefix + "النص بعد التدقيق والمراجعة المحلية:\n\n" + cleaned
+                    .replace("يارب", "يا رب")
+                    .replace(" لكن ", " لٰكن ")
+                offlinePrefix + "✨ **تصحيح لغوي ومراجعة التدقيق النحوي والإملائي (تحسين آلي محلي):**\n\n" + cleaned
             }
 
             AIFeature.EXPAND -> {
-                offlinePrefix + text + "\n\n" +
-                        "💡 [مساهمة من مساعد الذكاء الاصطناعي لتوسيع فكرتك]:\n" +
-                        "1. ما هي الدوافع الأساسية وراء الفكرة؟ (يُنصح بالتعمق في الأسباب التاريخية/العملية)\n" +
-                        "2. كيف تؤثر العوامل المحيطة والبيئية على تطبيق الفكرة؟\n" +
-                        "3. ما هي الخطوة المستقبلية المتوقعة للبدء فوراً؟"
+                offlinePrefix + "**📝 النص الأصلي مع مقترحات التوسعة والمحاور العلمية المضافة:**\n\n" + text + "\n\n" +
+                        "➕ **أبعاد إضافية يُنصح بكتابتها لتكملة الفكرة:**\n" +
+                        "1️⃣ **الجانب التنفيذي:** ما هي الخطوات التفصيلية للبدء في هذا المخطط وتجنب العقبات؟\n" +
+                        "2️⃣ **التأثير الفعلي:** كيف ستؤثر هذه الأفكار على مخرجات اليوم والعمل؟\n" +
+                        "3️⃣ **البدائل المتاحة:** هل هناك حلول بديلة تزيد الكفاءة وتقلل الجهد الزمني والمادي؟"
             }
 
             AIFeature.TRANSLATE_EN -> {
-                offlinePrefix + "English translation is currently optimized for Online Mode to assure full fluency.\n" +
-                        "Here is your note's title and sample text locally translated to aid contextual verification:\n\n" +
-                        "Offline representation:\n" +
-                        "Title: Note Study Item\n" +
-                        "Excerpt: " + text.take(120) + "...\n\n" +
-                        "(⚠️ الترجـمة المتكاملة تتطلب الاتصال بالشبكة لطلب حزم اللغات من السيرفر)"
+                offlinePrefix + "🇬🇧 **English Interpretation & Translation Hint:**\n\n" +
+                        "For full grammatical fluency, consider connecting to the internet and inputting your Gemini API key in settings.\n\n" +
+                        "**Quick Translated Heading Proposal:**\n" +
+                        "\"" + (lines.firstOrNull()?.take(30) ?: "My Smart Note") + "\"\n\n" +
+                        "**Core Excerpt Concept translated:**\n" +
+                        "The user's note describes structural points related to \"" + (words.take(5).joinToString(" ")) + "\". Ensure adding rich action steps to build upon this."
             }
 
             AIFeature.TRANSLATE_AR -> {
-                offlinePrefix + "الترجمة الفورية للعربية الفصحى (محلياً):\n\n" +
-                        "المحتوى الاصطلاحي الأصلي لملاحظتكم الكريمة:\n" +
-                        text + "\n\n" +
-                        "(⚠️ الترجمة من اللغات الأجنبية الأخرى بدقة عالية تتطلب توفر اتصال إنترنت حالي)"
+                offlinePrefix + "🇸🇦 **الترجمة للعربية الفصحى (تحليل السياق المحلي):**\n\n" +
+                        "«النص المعرب المقترح لسطوركم الكريمة:\n\n" + text + "\n\n(💡 تلميح: الترجمة الدقيقة من اللغات الأخرى بأعلى جودة تطلب إعداد مفتاح API في الإعدادات)»"
             }
 
             AIFeature.FLASHCARDS -> {
                 val cards = mutableListOf<String>()
-                val items = lines.take(3)
-                items.forEachIndexed { idx, line ->
-                    if (line.length > 10) {
-                        cards.add("❓ البطاقة ${idx + 1}: ما هي التفاصيل المتعلقة بـ : (${line.take(30)}...)؟\n🟢 الإجابة النموذجية: $line")
+                lines.take(3).forEachIndexed { index, line ->
+                    if (line.length > 15) {
+                        cards.add("🃏 **السؤال ${index + 1}:** ما هو المحور الرئيسي لـ \"${line.take(40)}...\"؟\n🟢 **الإجابة:** تشير التفاصيل المحلية لكونها: ${line}")
                     }
                 }
                 if (cards.isEmpty()) {
-                    cards.add("❓ البطاقة 1: ما هو المحور والقلب الأساسي للمسودة؟\n🟢 الإجابة: تتحدث السطور عن \"${lines.firstOrNull()?.take(50) ?: "غير محدد"}\"")
-                    cards.add("❓ البطاقة 2: ما هي خطة المراجعة للنهوض بهذه الفكرة؟\n🟢 الإجابة: استخراج مذكرات تكميلية للدرس وحفظها محلياً.")
+                    cards.add("🃏 **السؤال 1:** ما هو المفصل الأساسي في هذه الملاحظة؟\n🟢 **الإجابة:** تدوين ومراجعة فكرتكم الجديدة: \"${lines.firstOrNull()?.take(40) ?: "الفكرة العامة"}\".")
+                    cards.add("🃏 **السؤال 2:** كيف يمكن استثمار هذه السطور في التطوير؟\n🟢 **الإجابة:** تلخيصها وتجزئتها لمهام TODO والعمل عليها يومياً.")
                 }
-                offlinePrefix + "بطاقات الاستذكار الذكية (Flashcards):\n\n" + cards.joinToString("\n\n")
+                offlinePrefix + "🗂️ **بطاقات الاستذكار والأسئلة التفاعلية للمذاكرة (Flashcards):**\n\n" + cards.joinToString("\n\n")
             }
 
             AIFeature.MIND_MAP -> {
-                var map = "🌲 الخريطة الذهنية المنظمة (مستويات الأفكار):\n"
-                map += "📌 [رأس الموضوع]  ──► " + (lines.firstOrNull()?.take(40) ?: "الفكرة العامة") + "\n"
+                var map = "🧠 **هيكلة الخريطة الذهنية المترابطة للأفكار:**\n\n"
+                map += "⭐ [الـفـكـرة الـعـامـة] ──► " + (lines.firstOrNull()?.take(40) ?: "عنوان المذكرة") + "\n"
                 if (lines.size > 1) {
-                    lines.drop(1).take(5).forEachIndexed { i, l ->
-                        if (l.trim().length > 6) {
-                            val branch = if (i == lines.size - 2 || i == 4) "└──" else "├──"
-                            map += "   $branch ⚙️ [فكرة فرعية $i] ──► " + l.trim().take(55) + "...\n"
+                    lines.drop(1).take(5).forEachIndexed { index, line ->
+                        if (line.trim().length > 10) {
+                            val connector = if (index == lines.size - 2 || index == 4) "└──" else "├──"
+                            map += "    $connector ⚙️ [فرع ${index+1}] ──► " + line.trim().take(60) + "...\n"
                         }
                     }
                 } else {
-                    map += "   ├── 🔹 مفهوم رئيسي وصفي للمسودة.\n"
-                    map += "   ├── 🔹 خطة العمل والآليات.\n"
-                    map += "   └── 🔹 الخاتمة والملاحظات الإضافية.\n"
+                    map += "    ├── 🔹 المحور الهيكلي والمفاهيم الأولية.\n"
+                    map += "    ├── 🔹 خطة العمل والمهام المطلوبة.\n"
+                    map += "    └── 🔹 الأهداف والغايات الموصى بها في النهاية.\n"
                 }
                 offlinePrefix + map
             }
 
             AIFeature.TAGS -> {
-                // Heuristic: Extract nouns/words with length > 4 that appear in note, avoiding typical Arabic prepositions
-                val stopWords = setOf("هذا", "هذه", "التي", "الذي", "فيها", "منها", "عليها", "كانت", "علما", "يكون", "تطبيق", "ملاحظة")
+                val stopWords = setOf("هذا", "هذه", "التي", "الذي", "فيها", "منها", "عليها", "كانت", "علما", "يكون", "تطبيق", "ملاحظة", "أنت")
                 val cleanWords = words
                     .map { it.replace(Regex("[.,;:\"'#؟!«»]"), "") }
                     .filter { it.length > 3 && !stopWords.contains(it) }
-                
-                val distinctTags = cleanWords.distinct().take(5).map { "#$it" }
-                val tagsStr = if (distinctTags.isNotEmpty()) distinctTags.joinToString(" ") else "#ملاحظة #أفكار_ذكية #دراسة #تذكير"
-                offlinePrefix + "الوسوم والهاشتاغات المقترحة تلقائياً لتسهيل الأرشفة:\n\n🏷️ $tagsStr"
+                val distinctTags = cleanWords.distinct().take(6).map { "#$it" }
+                val tagsStr = if (distinctTags.isNotEmpty()) distinctTags.joinToString(" ") else "#أفكار_جديدة #مفردات_ذكية #مذاكرة #تطوير"
+                offlinePrefix + "🏷️ **الوسوم والهاشتاغات المستخرجة تلقائياً لتسهيل التصنيف والبحث:**\n\n$tagsStr"
             }
 
             AIFeature.FOR_KIDS -> {
-                val kidsCore = text.substring(0, Math.min(text.length, 120))
-                offlinePrefix + "👨‍👩‍👧‍👦 الشرح والتمثيل اللطيف للأبطال الصغار:\n\n" +
-                        "«يا بطل! هل تعلم؟ فكرتنا اليوم تشبه لعبة تركيب المكعبات المذهلة! 🧩 الموضوع يخبرنا أن:\n" +
-                        "($kidsCore...)\n" +
-                        "تماما مثل بطل خارق يقوم بتنظيم ألعابه وسياراته الملونة بدقة فائقة لينتصر في النهاية! 🌟 ما رأيك في مشاركة هذه اللعبة الشيقة مع أصدقائك؟»"
+                val core = text.take(130)
+                offlinePrefix + "👧👶 **تبسيط المفاهيم بأسلوب حكائي مشوق ورسوم للأطفال الصغار:**\n\n" +
+                        "«يا بطل الخارق! 🌟 هل تعلم أن فكرتك اليوم مشهورة ومهمة جداً؟ إنها تشبه لعبة تركيب المكعبات الذكية! 🧩 وموضوع قصة اليوم يخبرنا أن:\n\n" +
+                        "《 $core... 》\n\n" +
+                        "تماماً مثل شخصيتي الكرتونية المفضلة وهي تنظم وترسم بخيالها لتفوز في التحدي الكبير! حاول أن ترسمها وتشاركها مع من تحب لنتعلم معاً! 🎈🚀»"
             }
 
             AIFeature.AUTO_COMPLETE -> {
-                offlinePrefix + text + "\n" +
-                        "(✍️ إكمال مقترح مسترسل تلقائياً): ... ومن هذا المنطلق يتضح لنا جلياً أهمية الربط بين هذه الأفكار لإنشاء نموذج عمل متكامل يحقق المستويات المطلوبة من الكفاءة والاستقرار، وإليك أبرز الأدوات المقترحة لتحقيق هذا... "
+                offlinePrefix + "✍️ **التكملة الذكية المقترحة لسطوركم الكريمة:**\n\n" + text +
+                        "\n\n💡 *[تتمة مقترحة آلياً]*: ... ومن هذا المنطلق يتضح لنا جلياً أهمية المتابعة والبحث المستمر في هذا المجال، حيث يجب الربط والتقييم لكي نوفر المخرجات والنتائج التي نطمح لتحقيقها بشكل عملي ومتكامل، وهو ما سنوضحه بالتفصيل في الخطوات المقبلة..."
             }
 
             AIFeature.CODE_EXPLAINER -> {
-                // Simple regex to look for typical code signs like equals, braces, semicolons, brackets, or dots
-                val hasBraces = text.contains("{") || text.contains("}")
-                val hasSemicolons = text.contains(";")
-                val hasCodeKeywords = text.contains("val ") || text.contains("fun ") || text.contains("class ") || text.contains("import ") || text.contains("const ") || text.contains("let ") || text.contains("function")
-
-                val codeDetails = if (hasBraces || hasSemicolons || hasCodeKeywords) {
-                    "✅ تم اكتشاف جزء برمجي (Code Snippet) في ملاحظتك!\n\n" +
-                            "• الهيكل العام: يحتوي على أقواس متعرجة أو كلمات مفتاحية للتصاريح.\n" +
-                            "• تحليل الدلالات: يُشير الكود للغات الشائعة (مثل Kotlin/Dart/JavaScript/Java) لبناء خوارزميات أو إدارة دوال برمجية.\n" +
-                            "• الفائدة: ننصح بالتحقق من كتابة أسماء المتغيرات بأسلوب CamelCase لإبقاء الشفرة أنيقة."
+                val hasCode = text.contains("{") || text.contains("}") || text.contains(";") || text.contains("fun ") || text.contains("class ") || text.contains("val ") || text.contains("var ")
+                val explanation = if (hasCode) {
+                    "🎯 **تحليل للأكواد المكتشفة في المسودة:**\n\n" +
+                            "• **النمط الهيكلي:** الكود يحتوي على دوال أو تصاريح برمجية شائعة لترتيب المنطق البرمجي.\n" +
+                            "• **التوصيات الفنية:** تذكر الحفاظ على تسمية المتغيرات بالطريقة الاصطلاحية (camelCase) وتوثيق الدوال البرمجية لضمان سهولة صيانتها لاحقاً."
                 } else {
-                    "💡 لم نتمكن من العثور على شفرة برمجية واضحة في النص في وضع عدم الاتصال.\n\n" +
-                            "تأكد من إدراج الكود البرمجي بوضوح (مثلاً باستخدام الأقواس البرمجية `{ ... }` أو عبارات برمجية مثل `fun` أو `var`) لكي يظهر لك تحليل كامل للمتغيرات والمكتبات والوظائف المستدعاة."
+                    "🎯 **محلل الأكواد:** لم يعثر المعالج على تعابير برمجية صريحة. قم بإدراج منطقك البرمجي، وسيوفر المعالج توصيات لهيكلة الشفرة فوراً."
                 }
-                offlinePrefix + codeDetails
+                offlinePrefix + explanation
             }
         }
     }

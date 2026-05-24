@@ -38,6 +38,12 @@ class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
     private val _editorAttachments = MutableStateFlow<List<Attachment>>(emptyList())
     val editorAttachments: StateFlow<List<Attachment>> = _editorAttachments.asStateFlow()
 
+    private val _editorIsPinned = MutableStateFlow(false)
+    val editorIsPinned: StateFlow<Boolean> = _editorIsPinned.asStateFlow()
+
+    private val _editorCategory = MutableStateFlow("عام")
+    val editorCategory: StateFlow<String> = _editorCategory.asStateFlow()
+
     // Search query
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -97,6 +103,8 @@ class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
         _editorTitle.value = note.title
         _editorContent.value = note.content
         _editorAttachments.value = deserializeAttachments(note.attachmentsString)
+        _editorIsPinned.value = note.isPinned
+        _editorCategory.value = note.category
         _currentScreen.value = Screen.EDIT
     }
 
@@ -104,6 +112,8 @@ class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
         _editorTitle.value = ""
         _editorContent.value = ""
         _editorAttachments.value = emptyList()
+        _editorIsPinned.value = false
+        _editorCategory.value = "عام"
         _aiResult.value = null
         _aiResultTitle.value = ""
     }
@@ -114,6 +124,21 @@ class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
 
     fun updateEditorContent(content: String) {
         _editorContent.value = content
+    }
+
+    fun toggleEditorPinned() {
+        _editorIsPinned.value = !_editorIsPinned.value
+    }
+
+    fun updateEditorCategory(category: String) {
+        _editorCategory.value = category
+    }
+
+    fun togglePinNote(note: Note) {
+        viewModelScope.launch {
+            val updatedNote = note.copy(isPinned = !note.isPinned, updatedAt = System.currentTimeMillis())
+            repository.insertNote(updatedNote)
+        }
     }
 
     // Attachments Handling
@@ -177,11 +202,15 @@ class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
                 title = title,
                 content = content,
                 attachmentsString = attachmentsStr,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = System.currentTimeMillis(),
+                isPinned = _editorIsPinned.value,
+                category = _editorCategory.value
             ) ?: Note(
                 title = title,
                 content = content,
-                attachmentsString = attachmentsStr
+                attachmentsString = attachmentsStr,
+                isPinned = _editorIsPinned.value,
+                category = _editorCategory.value
             )
 
             val savedId = repository.insertNote(noteToSave)
