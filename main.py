@@ -38,7 +38,15 @@ FONT_PATH_AR = "ArabicFont.ttf"
 FONT_PATH_EN = "Roboto-Regular.ttf"
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "")
+
+# قائمة موديلات مجانية احتياطية على OpenRouter، بيجرب واحد واحد لو الأول مش شغال
+FALLBACK_MODELS = [
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+]
 
 def safe_wrap(text, width):
     words = text.split()
@@ -66,6 +74,9 @@ def youtube_authenticate():
 def generate_scary_story():
     print("⏳ جاري توليد قصة رعب أصلية بالذكاء الاصطناعي...")
 
+    if not OPENROUTER_API_KEY:
+        raise Exception("OPENROUTER_API_KEY مش موجود في الـ environment variables / secrets!")
+
     system_prompt = (
         "أنت كاتب محترف لقصص الرعب القصيرة على طريقة حكايات Reddit (نقطة نظر أول شخص، "
         "واقعية، مشوّقة، نهاية صادمة أو مفتوحة). اكتب قصة رعب أصلية بالكامل (مش منقولة أو "
@@ -76,38 +87,50 @@ def generate_scary_story():
         '{"title": "عنوان جذاب قصير للقصة", "sentences": ["الجملة الأولى", "الجملة الثانية", "..."]}'
     )
 
-    for attempt in range(5):
-        try:
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": OPENROUTER_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": "اكتب لي قصة رعب جديدة ومختلفة عن أي قصة سابقة."},
-                    ],
-                    "temperature": 1.0,
-                },
-                timeout=60,
-            )
-            data = resp.json()
-            raw = data["choices"][0]["message"]["content"].strip()
-            # تنظيف أي markdown fences لو الموديل ضافها بالغلط
-            raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-            parsed = json.loads(raw)
-            title = parsed["title"].strip()
-            sentences = [s.strip() for s in parsed["sentences"] if s.strip()]
-            if title and len(sentences) >= 3:
-                return title, sentences
-        except Exception as e:
-            print(f"⚠️ محاولة {attempt+1} فشلت: {e}")
-            continue
+    models_to_try = ([OPENROUTER_MODEL] if OPENROUTER_MODEL else []) + FALLBACK_MODELS
 
-    raise Exception("فشل توليد القصة بعد عدة محاولات!")
+    last_error = None
+    for model in models_to_try:
+        for attempt in range(2):
+            try:
+                resp = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": "اكتب لي قصة رعب جديدة ومختلفة عن أي قصة سابقة."},
+                        ],
+                        "temperature": 1.0,
+                    },
+                    timeout=60,
+                )
+                data = resp.json()
+
+                if "choices" not in data:
+                    print(f"⚠️ الموديل '{model}' رجّع رد بدون choices. الرد الكامل:")
+                    print(json.dumps(data, ensure_ascii=False, indent=2))
+                    last_error = data.get("error", {}).get("message", "unknown error")
+                    break
+
+                raw = data["choices"][0]["message"]["content"].strip()
+                raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
+                parsed = json.loads(raw)
+                title = parsed["title"].strip()
+                sentences = [s.strip() for s in parsed["sentences"] if s.strip()]
+                if title and len(sentences) >= 3:
+                    print(f"✅ نجح توليد القصة باستخدام الموديل: {model}")
+                    return title, sentences
+            except Exception as e:
+                last_error = str(e)
+                print(f"⚠️ محاولة {attempt+1} مع الموديل '{model}' فشلت: {e}")
+                continue
+
+    raise Exception(f"فشل توليد القصة بعد تجربة كل الموديلات! آخر خطأ: {last_error}")
 
 # ================== تحويل الجمل لصوت (Edge TTS) ==================
 async def _tts_save(text, out_path):
