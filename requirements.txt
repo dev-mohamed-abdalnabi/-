@@ -8,6 +8,6 @@ requests
 imageio-ffmpeg
 scipy
 edge-tts
-TTS
+
 torch
 torchaudio
