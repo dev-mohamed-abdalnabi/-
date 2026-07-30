@@ -36,25 +36,17 @@ FONT_PATH_EN = "Roboto-Regular.ttf"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "")
 
+# ================== إعدادات XTTS-v2 (صوت بشري واقعي) ==================
+USE_XTTS = os.environ.get("USE_XTTS", "true").strip().lower() in ("1", "true", "yes")
+XTTS_REFERENCE_AUDIO = os.environ.get("XTTS_REFERENCE_AUDIO", "speaker.wav") # مسار ملف صوت بشري لاستنساخ نبرته (يجب توفيره)
+_xtts_model = None # متغير لتخزين الموديل في الذاكرة لتجنب إعادة تحميله مع كل جملة
+
 # ================== صوت أفضل (اختياري) ==================
-# edge-tts مجاني لكنه محدود في التعبير والطبيعية. لو عايز صوت أحسن بكتير وأكثر
-# طبيعية وتعبير (نبرة حقيقية بدل الإلقاء الجامد)، اعمل حساب على elevenlabs.io
-# ودوّر في مكتبة الأصوات على صوت عربي (فيه أصوات عربي كتير كويسة جدًا)، وحط:
-#   ELEVENLABS_API_KEY  = مفتاح الحساب
-#   ELEVENLABS_VOICE_ID = الـ ID بتاع الصوت اللي اخترته
-# لو الاتنين متسجلين، الكود هيستخدم ElevenLabs تلقائيًا بدل edge-tts.
-# مفيش باقة مجانية لا نهائية في ElevenLabs (بتدفع بعد الكوتة المجانية الشهرية)،
-# لكن جودة الصوت والتعبير فرق كبير عن edge-tts.
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
 ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 
 # ================== بديل مجاني بالكامل وبدون أي حساب: Piper ==================
-# Piper محرك تحويل نص-لصوت مفتوح المصدر (MIT) شغّال محلي بدون إنترنت وقت التشغيل
-# وبدون أي تسجيل أو مفتاح API. مش هيبقى بالضرورة أحسن من edge-tts (اللي هو أصلاً
-# نفس محرك Azure العملاق مجاني)، لكنه محرك مختلف تمامًا يستاهل تجربه لو عايز تقارن.
-# مفعّل بس لو USE_PIPER=true، ولو فشل لأي سبب (تحميل الموديل، تثبيت الحزمة...)
-# الكود بيرجع تلقائي لـ edge-tts عادي من غير ما يوقف الفيديو.
 USE_PIPER = os.environ.get("USE_PIPER", "false").strip().lower() in ("1", "true", "yes")
 PIPER_VOICE_NAME = os.environ.get("PIPER_VOICE_NAME", "ar_JO-kareem-medium")
 PIPER_DIR = "piper_models"
@@ -73,8 +65,7 @@ STATIC_FALLBACK_MODELS = [
 ]
 
 # ================================================================
-# أنواع المحتوى - بدل ما كانت رعب بس، دلوقتي فيه 3 أنواع بيتم
-# اختيار واحد منهم عشوائي كل يوم عشان القناة متبقاش رتيبة
+# أنواع المحتوى
 # ================================================================
 CONTENT_TYPES = {
     "horror": {
@@ -199,10 +190,6 @@ CONTENT_TYPES = {
     },
 }
 
-# لو عايز تجرب صوت تاني بسرعة من غير ما تعدل كل نوع محتوى لوحده، حدد
-# TTS_VOICE_OVERRIDE في الـ secrets/env وهيتطبق على كل الأنواع.
-# أصوات عربية تستاهل تجربة: ar-EG-ShakirNeural / ar-EG-SalmaNeural (مصري)
-# ar-SA-HamedNeural / ar-SA-ZariyahNeural (سعودي، بينطق الفصحى أوضح غالبًا)
 TTS_VOICE_OVERRIDE = os.environ.get("TTS_VOICE_OVERRIDE", "").strip()
 if TTS_VOICE_OVERRIDE:
     for _cfg in CONTENT_TYPES.values():
@@ -219,7 +206,6 @@ def pick_content_type():
     return random.choices(types, weights=weights, k=1)[0]
 
 def get_free_models():
-    """يسأل OpenRouter عن قائمة الموديلات المجانية المتاحة فعلياً دلوقتي، ويرتبها من الأقوى للأضعف."""
     TRUSTED_PROVIDERS = [
         "google/", "deepseek/", "qwen/", "meta-llama/",
         "mistralai/", "nvidia/", "openai/", "moonshotai/", "z-ai/",
@@ -259,8 +245,6 @@ def get_free_models():
         return []
 
 def wrap_by_pixels(text, font, draw, max_width):
-    """تقسيم صحيح بالبكسل الفعلي (مش بعدد الحروف) عشان أي سطر متعديش عرض الشاشة
-    ويتقطع/يتاكل من الحواف."""
     words = text.split()
     lines = []
     current = []
@@ -282,15 +266,12 @@ def youtube_authenticate():
     creds = Credentials.from_authorized_user_info(token_data)
     return build('youtube', 'v3', credentials=creds)
 
-# ================== تنظيف النص قبل تحويله لصوت ==================
 def preprocess_for_tts(text):
-    """شبكة أمان: يشيل أي حروف/رموز ممكن تخلي الصوت الصناعي ينطق غلط أو يتوقف فجأة."""
-    text = re.sub(r"[A-Za-z]+", "", text)          # يشيل أي كلمات إنجليزية لو فلتت من الموديل
-    text = re.sub(r"[#*_~`\[\]{}<>]", "", text)     # رموز markdown/برمجية غريبة
+    text = re.sub(r"[A-Za-z]+", "", text)
+    text = re.sub(r"[#*_~`\[\]{}<>]", "", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text
 
-# ================== توليد المحتوى (قصة/معلومات/لغز) ==================
 def generate_content(content_type):
     cfg = CONTENT_TYPES[content_type]
     print(f"⏳ جاري توليد محتوى نوع '{content_type}' بالذكاء الاصطناعي...")
@@ -346,7 +327,6 @@ def generate_content(content_type):
                 if not title or len(sentences) < 3:
                     continue
 
-                # فحص بسيط: ارفض لو بدأت بجملة مستهلكة/كليشيه
                 first = sentences[0]
                 if any(first.startswith(b) for b in BANNED_OPENERS):
                     print("⚠️ افتتاحية مكرورة/كليشيه، بيتم إعادة المحاولة...")
@@ -361,7 +341,31 @@ def generate_content(content_type):
 
     raise Exception(f"فشل توليد المحتوى بعد تجربة كل الموديلات! آخر خطأ: {last_error}")
 
-# ================== تحويل الجمل لصوت (Edge TTS) ==================
+# ================== دالة XTTS-v2 الجديدة ==================
+def _tts_xtts(text, out_base):
+    global _xtts_model
+    try:
+        from TTS.api import TTS
+    except ImportError:
+        raise Exception("مكتبة TTS غير مثبتة. يرجى تثبيتها عبر: pip install TTS")
+    
+    if _xtts_model is None:
+        print("⏳ جاري تحميل نموذج XTTS-v2 في الذاكرة (قد يستغرق بعض الوقت في المرة الأولى)...")
+        # يتم التحميل مرة واحدة فقط، يمكن تفعيل gpu=True إذا كان لديك كارت شاشة مدعوم
+        _xtts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2", gpu=False)
+        
+    if not os.path.exists(XTTS_REFERENCE_AUDIO):
+        raise Exception(f"ملف الصوت المرجعي مفقود: '{XTTS_REFERENCE_AUDIO}'. يرجى وضع ملف صوتي للنسخ في المجلد.")
+        
+    wav_path = out_base + ".wav"
+    _xtts_model.tts_to_file(
+        text=text,
+        file_path=wav_path,
+        speaker_wav=XTTS_REFERENCE_AUDIO,
+        language="ar"
+    )
+    return wav_path
+
 async def _tts_save(text, out_path, voice, rate, pitch):
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
     await communicate.save(out_path)
@@ -416,7 +420,12 @@ def _tts_piper(text, out_base):
     return wav_path
 
 def sentence_to_speech(text, out_base, voice, rate, pitch):
-    """بيرجع مسار الملف الصوتي الفعلي اللي اتعمل (الامتداد بيتغيّر حسب المحرك المستخدم)."""
+    if USE_XTTS:
+        try:
+            return _tts_xtts(text, out_base)
+        except Exception as e:
+            print(f"⚠️ فشل استخدام XTTS-v2، سيتم الرجوع للبدائل الأخرى: {e}")
+
     if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
         try:
             path = out_base + ".mp3"
@@ -473,8 +482,6 @@ def build_story_audio(sentences, voice, rate, pitch):
     return audio_clips, used_sentences, current_duration
 
 def compute_sentence_starts(audio_clips, n_sentences):
-    """السكتات القصيرة بين الجمل بقت جزء من قايمة audio_clips، فبنحسب بداية كل جملة فعلية
-    بمطابقة الكليبات اللي مدتها أطول من مدة السكتة الثابتة."""
     starts = []
     running = 0.0
     found = 0
@@ -486,9 +493,7 @@ def compute_sentence_starts(audio_clips, n_sentences):
         running += clip.duration
     return starts
 
-# ================== أدوات بصرية ==================
 def build_gradient_overlay(width, height, dur):
-    """تدرج داكن سينمائي: غامق أعلى (خلف العنوان) وأسفل (خلف الترجمة)، وأفتح في النص."""
     grad = np.zeros((height, width, 4), dtype=np.uint8)
     for y in range(height):
         p = y / height
@@ -502,8 +507,6 @@ def build_gradient_overlay(width, height, dur):
     return mp.ImageClip(grad).set_duration(dur)
 
 def build_context_badge(label, width, height, dur, font_path):
-    """شريط صغير ثابت طول الفيديو بيفضل يفكّر المشاهد بنوع المحتوى (رعب/معلومات/لغز)
-    حتى لو دخل نص الفيديو وهو ماسكش أول ثانية."""
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     font = ImageFont.truetype(font_path, 40)
@@ -517,22 +520,19 @@ def build_context_badge(label, width, height, dur, font_path):
     return mp.ImageClip(np.array(img)).set_duration(dur)
 
 def ken_burns(clip, dur, zoom=0.06):
-    """زووم بطيء وناعم على الخلفية عشان الفيديو يبقى حيوي مش ثابت جامد."""
     return clip.resize(lambda t: 1 + zoom * (t / dur)).set_position(("center", "center"))
 
 def draw_caption_image(sentence, width, height, font_path):
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    safe_max_width = width * 0.84  # هامش أمان يمين وشمال عشان النص ميلمسش حواف الشاشة
+    safe_max_width = width * 0.84
     max_lines_allowed = 4
 
     char_count = len(sentence)
     f_size = 92 if char_count < 60 else (76 if char_count < 120 else 62)
     f_size = min(f_size, 100)
 
-    # نقلل حجم الخط تدريجيًا لحد ما كل الأسطر تدخل داخل عرض الشاشة الآمن
-    # وعدد الأسطر يبقى معقول، عشان محدش سطر يتقطع من الحواف
     while f_size > 36:
         font = ImageFont.truetype(font_path, f_size)
         lines = wrap_by_pixels(sentence, font, d, safe_max_width)
