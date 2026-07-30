@@ -30,7 +30,6 @@ def mark_uploaded_today():
         f.write(today_str())
 
 # ================== إعدادات الصوت والخطوط ==================
-# أصوات Edge-TTS العربية المصرية (مجانية بالكامل)
 VOICES = ['ar-EG-ShakirNeural', 'ar-EG-SalmaNeural']
 TTS_VOICE = os.environ.get("TTS_VOICE", "ar-EG-ShakirNeural")
 
@@ -40,13 +39,52 @@ FONT_PATH_EN = "Roboto-Regular.ttf"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "")
 
-# قائمة موديلات مجانية احتياطية على OpenRouter، بيجرب واحد واحد لو الأول مش شغال
-FALLBACK_MODELS = [
-    "google/gemini-2.0-flash-exp:free",
+STATIC_FALLBACK_MODELS = [
     "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "qwen/qwen3-coder:free",
+    "google/gemma-3-27b-it:free",
+    "openai/gpt-oss-120b:free",
 ]
+
+def get_free_models():
+    """يسأل OpenRouter عن قائمة الموديلات المجانية المتاحة فعلياً دلوقتي، ويرتبها من الأقوى للأضعف."""
+    TRUSTED_PROVIDERS = [
+        "google/", "deepseek/", "qwen/", "meta-llama/",
+        "mistralai/", "nvidia/", "openai/", "moonshotai/", "z-ai/",
+    ]
+    EXCLUDE_KEYWORDS = ["vision", "embed", "guard", "moderation", "-base", "coder"]
+
+    try:
+        resp = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"} if OPENROUTER_API_KEY else {},
+            timeout=30,
+        )
+        data = resp.json().get("data", [])
+        candidates = []
+        for m in data:
+            pricing = m.get("pricing", {})
+            model_id = m.get("id", "")
+            context_len = m.get("context_length", 0) or 0
+            try:
+                prompt_price = float(pricing.get("prompt", "1"))
+                completion_price = float(pricing.get("completion", "1"))
+            except (TypeError, ValueError):
+                continue
+
+            if not (prompt_price == 0 and completion_price == 0 and model_id.endswith(":free")):
+                continue
+            if any(bad in model_id.lower() for bad in EXCLUDE_KEYWORDS):
+                continue
+
+            is_trusted = any(model_id.startswith(p) for p in TRUSTED_PROVIDERS)
+            candidates.append((is_trusted, context_len, model_id))
+
+        candidates.sort(key=lambda x: (not x[0], -x[1]))
+        return [c[2] for c in candidates]
+    except Exception as e:
+        print(f"⚠️ فشل جلب قائمة الموديلات المجانية: {e}")
+        return []
 
 def safe_wrap(text, width):
     words = text.split()
@@ -87,7 +125,16 @@ def generate_scary_story():
         '{"title": "عنوان جذاب قصير للقصة", "sentences": ["الجملة الأولى", "الجملة الثانية", "..."]}'
     )
 
-    models_to_try = ([OPENROUTER_MODEL] if OPENROUTER_MODEL else []) + FALLBACK_MODELS
+    dynamic_models = get_free_models()
+    models_to_try = (
+        ([OPENROUTER_MODEL] if OPENROUTER_MODEL else [])
+        + dynamic_models[:8]
+        + STATIC_FALLBACK_MODELS
+    )
+    seen = set()
+    models_to_try = [m for m in models_to_try if m and not (m in seen or seen.add(m))]
+
+    print(f"📋 هيتم تجربة {len(models_to_try)} موديل: {models_to_try}")
 
     last_error = None
     for model in models_to_try:
