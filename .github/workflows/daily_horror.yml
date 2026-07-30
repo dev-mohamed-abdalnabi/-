@@ -1,0 +1,61 @@
+name: Daily Horror Auto
+
+on:
+  schedule:
+    # يعمل يومياً الساعة 9 مساءً بتوقيت مصر (7 مساءً بتوقيت جرينتش) - وقت مشاهدة أعلى لمحتوى الرعب
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-horror-auto
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libraqm-dev libfreetype6-dev libharfbuzz-dev libfribidi-dev
+
+      - name: Install Libraries
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Bot
+        env:
+          TOKEN_BASE64: ${{ secrets.TOKEN_BASE64_HORROR }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python main.py
+
+      - name: Commit daily log if updated
+        if: success()
+        run: |
+          if git status --porcelain | grep daily_log.txt; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add daily_log.txt
+            git commit -m "Update daily upload log [skip ci]"
+            git push
+          else
+            echo "No log changes to commit"
+          fi
