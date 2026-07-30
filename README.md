@@ -21,7 +21,9 @@
 
 ## متغيرات اختيارية
 
-- `TTS_VOICE`: الصوت المستخدم (افتراضي `ar-EG-ShakirNeural`). البديل: `ar-EG-SalmaNeural` (صوت أنثى).
+- `TTS_VOICE_OVERRIDE`: يغيّر صوت edge-tts المستخدم في كل الأنواع دفعة واحدة (افتراضي `ar-EG-ShakirNeural` للرعب/اللغز و`ar-EG-SalmaNeural` للمعلومات). ده أصلاً محرك Azure النيورال بتاع مايكروسوفت مجاني تمامًا وبدون أي حساب، وفيه أصوات عربي كتير غير المصري تستاهل تجربها زي: `ar-SA-HamedNeural`، `ar-SA-ZariyahNeural`، `ar-JO-TaimNeural`، `ar-LB-RamiNeural`، `ar-KW-FahedNeural`، `ar-QA-MoazNeural`.
+- `USE_PIPER=true`: يفعّل محرك [Piper](https://github.com/rhasspy/piper) — مفتوح المصدر بالكامل (MIT)، شغّال محلي، **بدون أي حساب أو مفتاح API أو دفع**. مش مضمون يبقى أحسن من edge-tts (edge-tts أصلًا محرك Azure الاحترافي مجاني)، لكنه تكنولوجيا مختلفة تمامًا تستاهل تجربة. لو فشل التحميل أو التشغيل لأي سبب، الكود بيرجع تلقائي لـ edge-tts من غير ما يبوّظ الفيديو. الصوت الافتراضي `ar_JO-kareem-medium` قابل للتغيير عبر `PIPER_VOICE_NAME` (لو غيّرته لازم تضيف رابط تحميله في `PIPER_VOICE_URLS` جوه main.py).
+- `ELEVENLABS_API_KEY` + `ELEVENLABS_VOICE_ID`: لو قررت يومًا إن التكلفة مقبولة مقابل جودة/تعبير أعلى بكتير — مش مجاني بالكامل، فيه كوتة شهرية مجانية بس بعدها بيتحاسب. اختياري تمامًا ومش لازم تستخدمه.
 - `OPENROUTER_MODEL`: الموديل المستخدم لتوليد القصة (افتراضي `google/gemini-2.0-flash-exp:free`). راجع openrouter.ai/models للموديلات المجانية المتاحة حالياً — القائمة بتتغير باستمرار.
 
 ## تشغيل يدوي محلي
