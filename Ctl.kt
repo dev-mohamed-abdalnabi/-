@@ -1,8 +1,12 @@
 package com.next.files
 
 import android.content.Context
+import android.net.Uri
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -27,13 +31,99 @@ object Ctl {
     var clipCut by mutableStateOf(false)
     var busy by mutableStateOf<String?>(null)
     var rev by mutableIntStateOf(0)
-    var browseDir by mutableStateOf<File?>(null)
+    // ---- تابات التصفح ----
+    val tabs = mutableStateListOf<File?>(null)
+    var tabIdx by mutableIntStateOf(0)
+    var browseDir: File?
+        get() = tabs.getOrNull(tabIdx)
+        set(v) {
+            if (tabs.isEmpty()) tabs.add(v) else tabs[tabIdx.coerceIn(0, tabs.lastIndex)] = v
+        }
+
+    fun newTab(f: File? = null) {
+        tabs.add(f ?: browseDir)
+        tabIdx = tabs.lastIndex
+        tab = 0
+        stack.clear()
+    }
+
+    fun closeTab(i: Int) {
+        if (tabs.size <= 1 || i !in tabs.indices) return
+        tabs.removeAt(i)
+        if (i < tabIdx) tabIdx-- else if (tabIdx > tabs.lastIndex) tabIdx = tabs.lastIndex
+    }
+    var pendingUri: Uri? = null
+
+    /** فتح ملف جاي من تطبيق تاني (فتح بواسطة Next) */
+    fun openExternal(uri: Uri) {
+        task("جاري فتح الملف…", { Incoming.resolve(app, uri) }, fail = { e ->
+            toast(e.message ?: "تعذر فتح الملف"); true
+        }) { r -> showExternal(r) }
+    }
+
+    private fun showExternal(r: Incoming.Result) {
+        val f = r.file
+        val k = FS.kindOf(f.extension.lowercase())
+        val internal = when (k) {
+            Kind.IMAGE -> true
+            Kind.ARCHIVE -> Arc.supported(f)
+            Kind.TEXT -> f.length() <= 1_000_000L
+            Kind.VIDEO, Kind.AUDIO -> true
+            Kind.DOC -> f.extension.equals("pdf", true)
+            else -> false
+        }
+        stack.clear()
+        tab = 0
+        if (f.isDirectory) {
+            openDir(f)
+        } else if (internal) {
+            if (r.temp && k == Kind.TEXT) toast("ده نسخة مؤقتة - التعديل مش هيتحفظ في الملف الأصلي")
+            open(f, listOf(f))
+        } else if (r.temp) {
+            task("جاري الحفظ…", {
+                val dest = Incoming.saveDir().also { it.mkdirs() }
+                val out = FS.unique(dest, f.name, false)
+                f.copyTo(out)
+                f.parentFile?.deleteRecursively()
+                out
+            }) { out ->
+                FS.scan(app, listOf(out.path))
+                openDir(out.parentFile ?: out)
+                toast("اتحفظ ${out.name} في Download")
+            }
+        } else {
+            openDir(f.parentFile ?: f)
+            toast(f.name)
+        }
+    }
+
+    /** استلام ملفات من "مشاركة إلى Next": بتتحط في الحافظة (قص) وتلصقها في أي مجلد */
+    fun receive(uris: List<Uri>) {
+        if (uris.isEmpty()) { toast("مفيش ملفات في المشاركة"); return }
+        task("جاري استلام الملفات…", { uris.map { Incoming.copy(app, it) } }, fail = { e ->
+            toast(e.message ?: "تعذر استلام الملفات"); true
+        }) { files ->
+            stack.clear()
+            tab = 0
+            setClip(files, true)
+        }
+    }
+
     var requestAccess: () -> Unit = {}
+    var pickSaf: (String) -> Unit = {}
 
     fun toast(m: String) {
         scope.launch {
             snack.currentSnackbarData?.dismiss()
             snack.showSnackbar(m)
+        }
+    }
+
+    fun toastUndo(m: String, label: String, onClick: () -> Unit) {
+        scope.launch {
+            snack.currentSnackbarData?.dismiss()
+            val r = snack.showSnackbar(m, actionLabel = label, duration = SnackbarDuration.Long)
+            if (r == SnackbarResult.ActionPerformed) onClick()
         }
     }
 
@@ -51,7 +141,7 @@ object Ctl {
 
     fun openDir(f: File) {
         browseDir = f
-        tab = 1
+        tab = 0
         stack.clear()
     }
 
@@ -62,7 +152,10 @@ object Ctl {
                 val list = if (imgs.contains(f.path)) imgs else listOf(f.path)
                 push(Overlay.Images(list, list.indexOf(f.path).coerceAtLeast(0)))
             }
+            Kind.ARCHIVE -> if (Arc.supported(f)) push(Overlay.Zip(f.path)) else FS.openFile(app, f)
             Kind.TEXT -> if (f.length() <= 1_000_000L) push(Overlay.Editor(f.path)) else FS.openFile(app, f)
+            Kind.VIDEO, Kind.AUDIO -> push(Overlay.Media(f.path))
+            Kind.DOC -> if (f.extension.equals("pdf", true)) push(Overlay.Pdf(f.path)) else FS.openFile(app, f)
             else -> FS.openFile(app, f)
         }
     }
@@ -78,8 +171,9 @@ object Ctl {
         clip.clear()
     }
 
-    fun <T> task(msg: String, work: () -> T, done: (T) -> Unit = {}) {
+    fun <T> task(msg: String, work: () -> T, fail: (Exception) -> Boolean = { false }, done: (T) -> Unit = {}) {
         scope.launch {
+            Prog.reset()
             busy = msg
             try {
                 val r = withContext(Dispatchers.IO) { work() }
@@ -87,9 +181,10 @@ object Ctl {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                toast(e.message ?: "حصلت مشكلة")
+                if (!fail(e)) toast(e.message ?: "حصلت مشكلة")
             } finally {
                 busy = null
+                Prog.reset()
                 bump()
             }
         }
@@ -100,6 +195,7 @@ object Ctl {
         val cut = clipCut
         if (items.isEmpty()) return
         task(if (cut) "جاري النقل…" else "جاري النسخ…", {
+            Prog.begin(if (cut) 0L else items.sumOf { FS.sizeOf(it) })
             val touched = ArrayList<String>()
             for (f in items) {
                 val r = if (cut) FS.move(f, dest) else FS.copy(f, dest)
@@ -122,19 +218,30 @@ object Ctl {
         val permanent = !Prefs.useTrash
         task(if (permanent) "جاري الحذف…" else "جاري النقل للسلة…", {
             val paths = files.map { it.path }
+            val ids = ArrayList<String>()
             for (f in files) {
                 if (permanent) {
                     if (!f.deleteRecursively()) throw IOException("تعذر حذف ${f.name}")
                 } else {
-                    TrashBin.put(f)
+                    ids.add(TrashBin.put(f))
                 }
             }
-            paths
-        }) { paths ->
+            paths to ids
+        }) { (paths, ids) ->
             FS.scan(app, paths)
             paths.forEach { Prefs.favorites.remove(it) }
             Prefs.save()
-            toast(if (permanent) "تم الحذف" else "اتنقل لسلة المحذوفات")
+            if (permanent) toast("تم الحذف")
+            else toastUndo("اتنقل ${paths.size} عنصر لسلة المحذوفات", "تراجع") { undoDelete(ids) }
+        }
+    }
+
+    fun undoDelete(ids: List<String>) {
+        task("جاري الاسترجاع…", {
+            TrashBin.list().filter { it.id in ids }.map { TrashBin.restore(it).path }
+        }) { paths ->
+            FS.scan(app, paths)
+            toast("اتسترجع ${paths.size} عنصر")
         }
     }
 
@@ -192,14 +299,20 @@ object Ctl {
         bump()
     }
 
-    fun zip(files: List<File>, name: String) {
+    fun zip(files: List<File>, name: String, pwd: String = "", fmt: Int = 0) {
         val parent = files.firstOrNull()?.parentFile ?: return
         var n = name.trim().ifEmpty { "archive" }
-        if (!n.lowercase().endsWith(".zip")) n += ".zip"
+        val ext = listOf(".zip", ".7z", ".tar.gz")[fmt.coerceIn(0, 2)]
+        if (!n.lowercase().endsWith(ext)) n += ext
         task("جاري الضغط…", {
+            Prog.begin(files.sumOf { FS.sizeOf(it) })
             val out = FS.unique(parent, n, false)
             try {
-                FS.zip(files, out)
+                when {
+                    fmt != 0 -> Arc.createArchive(files, out, if (fmt == 1) "7z" else "tgz")
+                    pwd.isEmpty() -> FS.zip(files, out)
+                    else -> Arc.createZip(files, out, pwd)
+                }
             } catch (e: Exception) {
                 out.delete()
                 throw e
@@ -211,20 +324,61 @@ object Ctl {
         }
     }
 
+    /** فك أرشيف كامل جنب الملف. لو محمي بباسورد بيفتح شاشة الاستعراض */
     fun unzip(f: File) {
-        val parent = f.parentFile ?: return
+        val parent = Incoming.destParent(app, f) ?: return
         task("جاري فك الضغط…", {
-            val dest = FS.unique(parent, f.nameWithoutExtension, true)
+            val dest = FS.unique(parent, f.name.substringBefore('.').ifEmpty { f.nameWithoutExtension }, true)
             try {
-                FS.unzip(f, dest)
+                Arc.extract(f, null, dest, null)
             } catch (e: Exception) {
                 dest.deleteRecursively()
                 throw e
             }
             dest.path
+        }, fail = { e ->
+            if (e is Arc.NeedPassword) { push(Overlay.Zip(f.path)); toast("الأرشيف محمي بباسورد - اكتبه علشان يتفك"); true } else false
         }) { p ->
             FS.scan(app, listOf(p))
             toast("تم فك الضغط في ${File(p).name}")
+        }
+    }
+
+    fun unzipSelected(zip: File, names: List<String>?, dest: File, pwd: String?, onNeedPwd: (Boolean) -> Unit) {
+        task("جاري فك الضغط…", {
+            val n = Arc.extract(zip, names, dest, pwd)
+            n to dest.path
+        }, fail = { e ->
+            if (e is Arc.NeedPassword) { dest.deleteRecursively(); onNeedPwd(e.wrong); true } else false
+        }) { (n, p) ->
+            FS.scan(app, listOf(p))
+            toast("اتفك $n ملف في ${File(p).name}")
+        }
+    }
+
+    fun batchRename(files: List<File>, pattern: String, start: Int, keepExt: Boolean) {
+        if (files.isEmpty() || pattern.isBlank()) { toast("اكتب نمط الاسم"); return }
+        val width = pattern.count { it == '#' }.coerceAtLeast(1)
+        val plan = files.mapIndexed { i, f ->
+            val num = (start + i).toString().padStart(width, '0')
+            val base = if (pattern.contains('#')) pattern.replace(Regex("#+"), num) else pattern + num
+            val ext = if (keepExt && f.isFile && f.extension.isNotEmpty()) "." + f.extension else ""
+            f to File(f.parentFile, base.trim() + ext)
+        }
+        val srcPaths = files.map { it.path }.toSet()
+        if (plan.map { it.second.path }.toSet().size != plan.size) { toast("الأسماء الجديدة فيها تكرار"); return }
+        if (plan.any { it.second.exists() && it.second.path !in srcPaths }) { toast("فيه ملف بنفس الاسم الجديد"); return }
+        task("جاري إعادة التسمية…", {
+            val tmp = plan.mapIndexed { i, (f, _) ->
+                val t = File(f.parentFile, ".nf_tmp_$i")
+                if (!f.renameTo(t)) throw IOException("تعذر تغيير اسم ${f.name}")
+                t
+            }
+            plan.forEachIndexed { i, (_, to) -> tmp[i].renameTo(to) }
+            plan.flatMap { listOf(it.first.path, it.second.path) }
+        }) { paths ->
+            FS.scan(app, paths)
+            toast("تمت إعادة تسمية ${plan.size} عنصر")
         }
     }
 
@@ -243,5 +397,36 @@ object Ctl {
 
     fun emptyTrash() {
         task("جاري تفريغ السلة…", { TrashBin.empty() }) { toast("السلة فاضية دلوقتي") }
+    }
+}
+
+/** تقدم العمليات الطويلة + إلغاء */
+object Prog {
+    @Volatile var cancel = false
+    @Volatile var done = 0L
+    @Volatile var total = 0L
+    private var lastPct = -1
+    var frac by mutableFloatStateOf(-1f)
+    var cancellable by mutableStateOf(false)
+
+    fun reset() {
+        cancel = false; done = 0; total = 0; lastPct = -1
+        frac = -1f
+        cancellable = false
+    }
+
+    fun begin(t: Long) {
+        cancel = false; done = 0; total = t; lastPct = -1
+        frac = if (t > 0) 0f else -1f
+        cancellable = true
+    }
+
+    fun add(n: Long) {
+        if (cancel) throw IOException("اتلغت العملية")
+        done += n
+        if (total > 0) {
+            val p = (done * 100 / total).toInt()
+            if (p != lastPct) { lastPct = p; frac = (done.toFloat() / total).coerceIn(0f, 1f) }
+        }
     }
 }

@@ -50,6 +50,8 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -84,15 +86,23 @@ private fun Glow(tertiary: Boolean = false, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun SearchField(q: String, hint: String, onChange: (String) -> Unit) {
+fun SearchField(q: String, hint: String, focus: FocusRequester? = null, onChange: (String) -> Unit) {
     TextField(
         value = q, onValueChange = onChange, singleLine = true,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+            .then(if (focus != null) Modifier.focusRequester(focus) else Modifier),
         shape = RoundedCornerShape(26.dp), colors = fieldColors(),
         placeholder = { Text(hint, maxLines = 1) },
         leadingIcon = { Icon(Ic.Search, null) },
         trailingIcon = { if (q.isNotEmpty()) IconButton({ onChange("") }) { Icon(Ic.Close, "مسح") } }
     )
+}
+
+@Composable
+private fun CircBtn(icon: ImageVector, desc: String, onClick: () -> Unit) {
+    IconButton(onClick, Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Icon(icon, desc, Modifier.size(22.dp))
+    }
 }
 
 // ===================== الرئيسية =====================
@@ -123,10 +133,10 @@ fun HomeScreen(bottom: Dp) {
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("مدير الملفات", style = MaterialTheme.typography.headlineMedium)
+                        Text("المزيد", style = MaterialTheme.typography.headlineMedium)
                         Text("Next · ${vols.size} وحدة تخزين", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                     }
-                    CookieIcon(Ic.Folder, 44.dp, cs.primary, cs.onPrimary)
+                    CookieIcon(Ic.Apps, 44.dp, cs.primary, cs.onPrimary)
                 }
             }
             items(vols) { v ->
@@ -198,8 +208,22 @@ fun HomeScreen(bottom: Dp) {
             }
             item { QuickRow(Ic.StarFill, "المفضلة", "${Prefs.favorites.size} عنصر") { Ctl.push(Overlay.Favorites) } }
             item { QuickRow(Ic.Trash, "سلة المحذوفات", "$trashN عنصر") { Ctl.push(Overlay.Trash) } }
+            item {
+                Text("أدوات", style = MaterialTheme.typography.titleMedium, color = cs.primary, modifier = Modifier.padding(top = 10.dp))
+            }
+            item { QuickRow(Ic.Chart, "المساحة والتنضيف", "أكبر الملفات · المكررات · الفاضي · المؤقت") { Ctl.push(Overlay.Storage) } }
+            item { QuickRow(Ic.Lock, "Android/data", "بيانات التطبيقات") { openAndroidDir("data") } }
+            item { QuickRow(Ic.Lock, "Android/obb", "ملفات OBB للألعاب") { openAndroidDir("obb") } }
+            item { QuickRow(Ic.Share, "نقل لاسلكي", "اتصفح وانقل ملفاتك من الكمبيوتر عبر الواي فاي") { Ctl.push(Overlay.Wifi) } }
+            item { QuickRow(Ic.Lock, "الخزنة المشفرة", "ملفاتك الخاصة بباسورد وتشفير AES-256") { Ctl.push(Overlay.Safe) } }
         }
     }
+}
+
+private fun openAndroidDir(sub: String) {
+    val f = File(Environment.getExternalStorageDirectory(), "Android/$sub")
+    if (android.os.Build.VERSION.SDK_INT <= 29 || (f.list()?.isNotEmpty() == true)) Ctl.openDir(f)
+    else Ctl.push(Overlay.AndroidDir(sub))
 }
 
 @Composable
@@ -227,6 +251,7 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
     val ctx = LocalContext.current
     val primary = remember { Environment.getExternalStorageDirectory() }
     val dir = Ctl.browseDir ?: primary
+    WatchDir(dir)
     var vols by remember { mutableStateOf(listOf<Vol>()) }
     LaunchedEffect(Unit) { vols = withContext(Dispatchers.IO) { FS.volumes(ctx) } }
     val atRoot = dir.path == primary.path || vols.any { it.dir.path == dir.path } || dir.parentFile == null
@@ -237,15 +262,19 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
     var results by remember { mutableStateOf<List<FileItem>?>(null) }
     val sel = remember { mutableStateListOf<String>() }
     var sortMenu by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    val fr = remember { FocusRequester() }
+    LaunchedEffect(searching) { if (searching) { delay(60); try { fr.requestFocus() } catch (e: Exception) { } } }
     var addMenu by remember { mutableStateOf(false) }
 
-    LaunchedEffect(dir.path, Ctl.rev, Prefs.showHidden, Prefs.sortBy, Prefs.sortAsc) {
+    val sortSel = Prefs.sortFor(dir)
+    LaunchedEffect(dir.path, Ctl.rev, Prefs.showHidden, sortSel) {
         loading = true
-        items = withContext(Dispatchers.IO) { FS.sort(FS.list(dir, Prefs.showHidden), Prefs.sortBy, Prefs.sortAsc) }
+        items = withContext(Dispatchers.IO) { FS.sort(FS.list(dir, Prefs.showHidden), sortSel.first, sortSel.second) }
         loading = false
         sel.removeAll { p -> items.none { it.file.path == p } }
     }
-    LaunchedEffect(dir.path) { sel.clear(); q = ""; results = null }
+    LaunchedEffect(dir.path) { sel.clear(); q = ""; results = null; searching = false }
     LaunchedEffect(q, dir.path, Ctl.rev) {
         if (q.trim().length < 2) {
             results = null
@@ -257,10 +286,10 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
 
     val shown = results ?: items
     val selecting = sel.isNotEmpty()
-    BackHandler(enabled = selecting || q.isNotEmpty() || !atRoot) {
+    BackHandler(enabled = selecting || searching || q.isNotEmpty() || !atRoot) {
         when {
             selecting -> sel.clear()
-            q.isNotEmpty() -> q = ""
+            searching || q.isNotEmpty() -> { q = ""; searching = false }
             else -> dir.parentFile?.let { Ctl.browseDir = it }
         }
     }
@@ -276,79 +305,95 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
         else Ctl.open(i.file, shown.filter { !it.isDir }.map { it.file })
     }
 
-    Glow {
+    Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                GridCells.Fixed(if (Prefs.grid) 3 else 1), Modifier.fillMaxSize().imePadding(),
+                GridCells.Fixed(if (Prefs.grid) listOf(4, 3, 2)[Prefs.viewSize.coerceIn(0, 2)] else 1), Modifier.fillMaxSize().imePadding(),
                 contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = bottom),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val full: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
                 item(span = full) {
-                    Row(
-                        Modifier.fillMaxWidth().statusBarsPadding().padding(top = 8.dp, start = 6.dp, end = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (!atRoot) IconButton({ dir.parentFile?.let { Ctl.browseDir = it } }) { Icon(Ic.Back, "للمجلد الأعلى") }
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                if (atRoot) "الملفات" else dir.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.headlineMedium
-                            )
-                            Text(
-                                dir.path.removePrefix(primary.path).ifEmpty { "/" }.let { "Next · $it" },
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant
-                            )
-                        }
-                        Box {
-                            CookieIcon(Ic.Menu, 44.dp, cs.primary, cs.onPrimary, onClick = { addMenu = true })
-                            DropdownMenu(addMenu, { addMenu = false }) {
-                                DropdownMenuItem(
-                                    { Text("مجلد جديد") }, { addMenu = false; d.mkdir = dir },
-                                    leadingIcon = { Icon(Ic.NewFolder, null, Modifier.size(20.dp)) }
-                                )
-                                DropdownMenuItem(
-                                    { Text("ملف جديد") }, { addMenu = false; d.newFile = dir },
-                                    leadingIcon = { Icon(Ic.NewFile, null, Modifier.size(20.dp)) }
-                                )
-                                DropdownMenuItem(
-                                    { Text(if (Prefs.grid) "عرض قائمة" else "عرض شبكة") },
-                                    { addMenu = false; Prefs.grid = !Prefs.grid; Prefs.save() },
-                                    leadingIcon = { Icon(Ic.Grid, null, Modifier.size(20.dp)) }
-                                )
-                                DropdownMenuItem(
-                                    { Text(if (Prefs.showHidden) "إخفاء الملفات المخفية" else "إظهار الملفات المخفية") },
-                                    { addMenu = false; Prefs.showHidden = !Prefs.showHidden; Prefs.save() },
-                                    leadingIcon = { Icon(Ic.Eye, null, Modifier.size(20.dp)) }
-                                )
+                    Column(Modifier.fillMaxWidth().statusBarsPadding().padding(top = 8.dp, start = 6.dp, end = 6.dp)) {
+                        TabStrip()
+                        if (searching) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) { SearchField(q, "ابحث في ${if (atRoot) "الملفات" else dir.name}", fr) { q = it } }
+                                Spacer(Modifier.size(8.dp))
+                                CircBtn(Ic.Close, "إغلاق البحث") { q = ""; searching = false }
                             }
-                        }
-                    }
-                }
-                item(span = full) {
-                    Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.weight(1f)) { SearchField(q, "ابحث في ${if (atRoot) "الملفات" else dir.name}") { q = it } }
-                        Box(Modifier.padding(start = 8.dp)) {
-                            IconButton({ sortMenu = true }, Modifier.size(52.dp).clip(CircleShape).background(cs.surfaceContainerHigh)) {
-                                Icon(Ic.Sort, "ترتيب")
-                            }
-                            DropdownMenu(sortMenu, { sortMenu = false }) {
-                                listOf("الاسم", "الحجم", "التاريخ", "النوع").forEachIndexed { i, n ->
-                                    DropdownMenuItem(
-                                        { Text(n) },
-                                        { Prefs.sortBy = i; Prefs.save(); sortMenu = false },
-                                        leadingIcon = {
-                                            if (Prefs.sortBy == i) Icon(Ic.Check, null, Modifier.size(20.dp), tint = cs.primary)
-                                            else Spacer(Modifier.size(20.dp))
-                                        }
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (!atRoot) IconButton({ dir.parentFile?.let { Ctl.browseDir = it } }) { Icon(Ic.Back, "للمجلد الأعلى") }
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        if (atRoot) "الملفات" else dir.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.headlineMedium
                                     )
+                                    Crumbs(dir, primary, vols)
                                 }
-                                DropdownMenuItem(
-                                    { Text(if (Prefs.sortAsc) "تصاعدي" else "تنازلي") },
-                                    { Prefs.sortAsc = !Prefs.sortAsc; Prefs.save(); sortMenu = false },
-                                    leadingIcon = { Icon(Ic.Up, null, Modifier.size(20.dp)) }
-                                )
+                                CircBtn(Ic.Search, "بحث") { searching = true }
+                                Spacer(Modifier.size(8.dp))
+                                Box {
+                                    CookieIcon(Ic.Menu, 44.dp, cs.primary, cs.onPrimary, onClick = { addMenu = true })
+                                    DropdownMenu(sortMenu, { sortMenu = false }) {
+                                        listOf("الاسم", "الحجم", "التاريخ", "النوع").forEachIndexed { i, n ->
+                                            DropdownMenuItem(
+                                                { Text("ترتيب: $n") },
+                                                { Prefs.setSort(dir, i, Prefs.sortFor(dir).second); sortMenu = false },
+                                                leadingIcon = {
+                                                    if (Prefs.sortFor(dir).first == i) Icon(Ic.Check, null, Modifier.size(20.dp), tint = cs.primary)
+                                                    else Spacer(Modifier.size(20.dp))
+                                                }
+                                            )
+                                        }
+                                        DropdownMenuItem(
+                                            { Text(if (Prefs.sortFor(dir).second) "تصاعدي" else "تنازلي") },
+                                            { val c = Prefs.sortFor(dir); Prefs.setSort(dir, c.first, !c.second); sortMenu = false },
+                                            leadingIcon = { Icon(Ic.Up, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text("الترتيب ده لكل المجلدات") },
+                                            { val c = Prefs.sortFor(dir); Prefs.sortAllLike(c.first, c.second); sortMenu = false }
+                                        )
+                                        if (Prefs.folderSort.containsKey(dir.path)) DropdownMenuItem(
+                                            { Text("رجوع للترتيب العام") },
+                                            { Prefs.clearSort(dir); sortMenu = false }
+                                        )
+                                    }
+                                    DropdownMenu(addMenu, { addMenu = false }) {
+                                        DropdownMenuItem(
+                                            { Text("مجلد جديد") }, { addMenu = false; d.mkdir = dir },
+                                            leadingIcon = { Icon(Ic.NewFolder, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text("ملف جديد") }, { addMenu = false; d.newFile = dir },
+                                            leadingIcon = { Icon(Ic.NewFile, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text("تاب جديد") }, { addMenu = false; Ctl.newTab(dir) },
+                                            leadingIcon = { Icon(Ic.Plus, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text("المساحة والتنضيف") }, { addMenu = false; Ctl.push(Overlay.Storage) },
+                                            leadingIcon = { Icon(Ic.Chart, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text("ترتيب") }, { addMenu = false; sortMenu = true },
+                                            leadingIcon = { Icon(Ic.Sort, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text(if (Prefs.grid) "عرض قائمة" else "عرض شبكة") },
+                                            { addMenu = false; Prefs.grid = !Prefs.grid; Prefs.save() },
+                                            leadingIcon = { Icon(Ic.Grid, null, Modifier.size(20.dp)) }
+                                        )
+                                        DropdownMenuItem(
+                                            { Text(if (Prefs.showHidden) "إخفاء الملفات المخفية" else "إظهار الملفات المخفية") },
+                                            { addMenu = false; Prefs.showHidden = !Prefs.showHidden; Prefs.save() },
+                                            leadingIcon = { Icon(Ic.Eye, null, Modifier.size(20.dp)) }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -369,6 +414,8 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                 }
                 if (!loading && shown.isEmpty()) item(span = full) {
                     if (q.trim().length >= 2) EmptyState(Ic.Search, "مفيش نتائج", "جرّب كلمة تانية.")
+                    else if (android.os.Build.VERSION.SDK_INT >= 30 && (dir.path.endsWith("/Android/data") || dir.path.endsWith("/Android/obb")))
+                        EmptyState(Ic.Lock, "النظام بيمنع الوصول هنا", "افتح المزيد ← Android/${dir.name} وامنح الصلاحية.")
                     else EmptyState(Ic.Folder, "المجلد فاضي", "مفيش ملفات هنا لسه.")
                 }
                 if (Prefs.grid) {
@@ -396,6 +443,17 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                     onZip = { d.zip = selFiles(); sel.clear() },
                     onDelete = { Ctl.askDelete(selFiles(), d); sel.clear() },
                     onClose = { sel.clear() },
+                    onRename = { d.batch = selFiles(); sel.clear() },
+                    onInvert = {
+                        val cur = sel.toSet()
+                        val inv = shown.map { it.file.path }.filter { it !in cur }
+                        sel.clear(); sel.addAll(inv)
+                    },
+                    onFav = {
+                        selFiles().forEach { if (it.path !in Prefs.favorites) Prefs.favorites.add(it.path) }
+                        Prefs.save(); sel.clear(); Ctl.toast("اتضافت للمفضلة")
+                    },
+                    onTab = { selFiles().firstOrNull { it.isDirectory }?.let { Ctl.newTab(it) }; sel.clear() },
                     modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
                 )
             }
@@ -416,7 +474,7 @@ fun CollectionScreen(kind: CatKind, d: DlgState) {
         loading = false
     }
     val allFiles = remember(files) { files.map { it.file } }
-    Glow(tertiary = true) {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             ScreenHeader(kind.title, "Next · ${files.size} عنصر", onBack = { Ctl.pop() })
             if (!loading && files.isEmpty()) {
@@ -454,7 +512,7 @@ fun iconForCat(k: CatKind): ImageVector = when (k) {
 fun FavoritesScreen(d: DlgState) {
     val cs = MaterialTheme.colorScheme
     val list = Prefs.favorites.map { File(it) }.filter { it.exists() }.map { FS.toItem(it) }
-    Glow {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             ScreenHeader("المفضلة", "Next · ${list.size} عنصر", onBack = { Ctl.pop() })
             if (list.isEmpty()) EmptyState(Ic.Star, "مفيش مفضلة", "ضيف ملفات أو مجلدات من قائمة المزيد.")
@@ -476,7 +534,7 @@ fun TrashScreen() {
     var list by remember { mutableStateOf(emptyList<TrashEntry>()) }
     var confirmEmpty by remember { mutableStateOf(false) }
     LaunchedEffect(Ctl.rev) { list = withContext(Dispatchers.IO) { TrashBin.list() } }
-    Glow(tertiary = true) {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             ScreenHeader("سلة المحذوفات", "Next · ${list.size} عنصر", onBack = { Ctl.pop() }) {
                 if (list.isNotEmpty()) TextButton({ confirmEmpty = true }) { Text("تفريغ", color = cs.error) }
@@ -488,7 +546,7 @@ fun TrashScreen() {
                         Modifier.fillMaxWidth().padding(6.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Box(
+                        if (e.isDir) Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) { FolderArt(Modifier.size(48.dp)) } else Box(
                             Modifier.size(56.dp).clip(RoundedCornerShape(16.dp))
                                 .background(if (e.isDir) cs.primaryContainer else cs.secondaryContainer),
                             contentAlignment = Alignment.Center

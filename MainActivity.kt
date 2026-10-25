@@ -51,6 +51,20 @@ class MainActivity : ComponentActivity() {
         Ctl.bump()
     }
 
+    private var safSub: String? = null
+    private val safPick = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val u = r.data?.data
+        val sub = safSub
+        if (r.resultCode == RESULT_OK && u != null && sub != null) {
+            try {
+                if (Saf.save(this, sub, u)) Ctl.toast("تم منح الوصول") else Ctl.toast("لازم تختار مجلد Android/$sub نفسه")
+            } catch (e: Exception) {
+                Ctl.toast("تعذر حفظ الصلاحية")
+            }
+            Ctl.bump()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -58,13 +72,61 @@ class MainActivity : ComponentActivity() {
         Prefs.init(applicationContext)
         Perm.refresh(this)
         Ctl.requestAccess = { requestAccess() }
+        Ctl.pickSaf = { sub ->
+            safSub = sub
+            try { safPick.launch(Saf.pickIntent(sub)) } catch (e: Exception) { Ctl.toast("الجهاز ده مش بيدعم الاختيار ده") }
+        }
+        Thread {
+            Arc.clearCache(applicationContext)
+            Incoming.clearOld(applicationContext)
+            Vault.clearViews()
+            try { TrashBin.purgeOld(Prefs.trashDays) } catch (e: Exception) { }
+        }.start()
         setContent { AppTheme { Shell() } }
+        if (savedInstanceState == null) handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun handleIntent(i: Intent?) {
+        if (i == null) return
+        if (i.action == Intent.ACTION_SEND || i.action == Intent.ACTION_SEND_MULTIPLE) {
+            val uris = ArrayList<Uri>()
+            val cd = i.clipData
+            if (cd != null) for (k in 0 until cd.itemCount) cd.getItemAt(k).uri?.let { uris.add(it) }
+            if (uris.isEmpty()) {
+                if (i.action == Intent.ACTION_SEND) i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.add(it) }
+                else i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.addAll(it) }
+            }
+            setIntent(Intent(this, MainActivity::class.java))
+            Ctl.receive(uris)
+            return
+        }
+        if (i.action != Intent.ACTION_VIEW) return
+        if (i.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        val u = i.data ?: return
+        setIntent(Intent(this, MainActivity::class.java))
+        Ctl.pendingUri = u
+        consumePending()
+    }
+
+    private fun consumePending() {
+        val u = Ctl.pendingUri ?: return
+        if (!Perm.granted) return
+        Ctl.pendingUri = null
+        Ctl.openExternal(u)
     }
 
     override fun onResume() {
         super.onResume()
         Perm.refresh(this)
         Ctl.bump()
+        consumePending()
     }
 
     private fun requestAccess() {
@@ -113,8 +175,8 @@ fun Shell() {
             Box(Modifier.fillMaxSize()) {
                 Crossfade(Ctl.tab, Modifier.fillMaxSize(), label = "tab") { t ->
                     when (t) {
-                        0 -> HomeScreen(bottom)
-                        1 -> BrowserScreen(bottom, d)
+                        0 -> BrowserScreen(bottom, d)
+                        1 -> HomeScreen(bottom)
                         else -> SettingsScreen(bottom)
                     }
                 }
@@ -141,6 +203,14 @@ fun Shell() {
                             is Overlay.Trash -> TrashScreen()
                             is Overlay.Editor -> EditorScreen(o.path)
                             is Overlay.Images -> ImageViewer(o)
+                            is Overlay.Zip -> ZipScreen(o.path)
+                            is Overlay.AndroidDir -> AndroidDirScreen(o.sub)
+                            is Overlay.Storage -> StorageScreen(d)
+                            is Overlay.Clean -> CleanScreen(o.key, d)
+                            is Overlay.Pdf -> PdfScreen(o.path)
+                            is Overlay.Media -> MediaScreen(o.path)
+                            is Overlay.Wifi -> WifiScreen()
+                            is Overlay.Safe -> VaultScreen()
                             null -> {}
                         }
                     }

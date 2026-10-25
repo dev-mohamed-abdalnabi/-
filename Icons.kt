@@ -148,11 +148,10 @@ object Ic {
     }
     val Archive by lazy {
         vec("archive") {
-            rr(3.5f, 4f, 17f, 4.8f, 1.8f)
-            moveTo(5f, 8.8f); verticalLineTo(17f)
-            arcTo(2.5f, 2.5f, 0f, false, false, 7.5f, 19.5f); horizontalLineTo(16.5f)
-            arcTo(2.5f, 2.5f, 0f, false, false, 19f, 17f); verticalLineTo(8.8f)
-            moveTo(10f, 12.5f); horizontalLineTo(14f)
+            fileShape()
+            moveTo(10.5f, 5.2f); verticalLineTo(6.6f)
+            moveTo(10.5f, 8.4f); verticalLineTo(9.8f)
+            rr(9f, 11.8f, 3f, 4.6f, 1.2f)
         }
     }
     val Download by lazy {

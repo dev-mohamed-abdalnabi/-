@@ -144,9 +144,11 @@ private fun Surface0(content: @Composable () -> Unit) {
 fun ImageViewer(o: Overlay.Images) {
     val pager = rememberPagerState(o.index) { o.paths.size }
     var zoomed by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf(false) }
+    val rot = remember { androidx.compose.runtime.mutableStateMapOf<Int, Int>() }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed) { p ->
-            ZoomImage(File(o.paths[p]), pager.currentPage == p) { zoomed = it }
+            ZoomImage(File(o.paths[p]), pager.currentPage == p, rot[p] ?: 0) { zoomed = it }
         }
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp),
@@ -166,14 +168,52 @@ fun ImageViewer(o: Overlay.Images) {
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 12.dp, vertical = 6.dp)
             )
+            IconButton(
+                { val c = pager.currentPage; rot[c] = ((rot[c] ?: 0) + 90) % 360 },
+                Modifier.padding(start = 8.dp).size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f))
+            ) { Text("⟳", color = Color.White, style = MaterialTheme.typography.titleLarge) }
+            IconButton(
+                { info = true },
+                Modifier.padding(start = 6.dp).size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f))
+            ) { Icon(Ic.Info, "تفاصيل", tint = Color.White) }
+        }
+        if (info) {
+            val f = File(o.paths[pager.currentPage])
+            val dim = remember(f.path) {
+                val op = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(f.path, op)
+                "${op.outWidth}×${op.outHeight}"
+            }
+            AlertDialog(
+                onDismissRequest = { info = false }, shape = RoundedCornerShape(28.dp),
+                title = { Text("تفاصيل الصورة") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(f.name)
+                        Text("الأبعاد: $dim")
+                        Text("الحجم: ${FS.fmtSize(f.length())}")
+                        Text("التاريخ: " + java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(f.lastModified())))
+                        Text(f.parent ?: "", style = MaterialTheme.typography.bodySmall)
+                    }
+                },
+                confirmButton = { TextButton({ info = false }) { Text("تمام") } }
+            )
         }
     }
 }
 
 @Composable
-private fun ZoomImage(f: File, active: Boolean, onZoom: (Boolean) -> Unit) {
-    val bmp by produceState<android.graphics.Bitmap?>(null, f.path) {
-        value = withContext(Dispatchers.IO) { Thumbs.decode(f, 2048) }
+private fun ZoomImage(f: File, active: Boolean, rotation: Int, onZoom: (Boolean) -> Unit) {
+    val bmp by produceState<android.graphics.Bitmap?>(null, f.path, rotation) {
+        value = withContext(Dispatchers.IO) {
+            val b = Thumbs.decode(f, 2048)
+            if (b != null && rotation != 0) {
+                android.graphics.Bitmap.createBitmap(
+                    b, 0, 0, b.width, b.height,
+                    android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }, true
+                )
+            } else b
+        }
     }
     var scale by remember { mutableFloatStateOf(1f) }
     var off by remember { mutableStateOf(Offset.Zero) }
@@ -305,6 +345,12 @@ fun SettingsScreen(bottom: Dp) {
             SettingRow(Ic.Grid, "العرض الشبكي", "اعرض الملفات كمربعات") {
                 Switch(Prefs.grid, { Prefs.grid = it; Prefs.save() })
             }
+            SettingRow(Ic.Edit, "حجم الخط", "يتطبق على التطبيق كله")
+            Switcher(listOf("صغير", "عادي", "كبير", "أكبر"), Prefs.fontIdx) { Prefs.fontIdx = it; Prefs.save() }
+            Spacer(Modifier.height(8.dp))
+            SettingRow(Ic.Image, "حجم العناصر", "الأيقونات والفولدرات في القائمة والشبكة")
+            Switcher(listOf("صغير", "متوسط", "كبير"), Prefs.viewSize) { Prefs.viewSize = it; Prefs.save() }
+            Spacer(Modifier.height(6.dp))
         }
         item {
             SectionTitle("الحذف")
@@ -314,11 +360,14 @@ fun SettingsScreen(bottom: Dp) {
             SettingRow(Ic.Info, "تأكيد قبل الحذف", "اسألني قبل ما أحذف") {
                 Switch(Prefs.confirmDelete, { Prefs.confirmDelete = it; Prefs.save() })
             }
+            SettingRow(Ic.Clock, "مسح السلة تلقائيًا", "يتمسح اللي فيها بعد المدة دي (بيتنفذ عند فتح التطبيق)")
+            Switcher(listOf("أبدًا", "7 أيام", "30 يوم"), listOf(0, 7, 30).indexOf(Prefs.trashDays).coerceAtLeast(0)) { Prefs.trashDays = listOf(0, 7, 30)[it]; Prefs.save() }
+            Spacer(Modifier.height(6.dp))
             SettingRow(Ic.Restore, "فتح السلة", "استرجع أو احذف نهائيًا", onClick = { Ctl.push(Overlay.Trash) })
         }
         item {
             SectionTitle("عن التطبيق")
-            SettingRow(Ic.Folder, "مدير الملفات", "الإصدار 1.0 · تصميم Next")
+            SettingRow(Ic.Folder, "مدير الملفات", "الإصدار 1.1 · تصميم Next")
             SettingRow(Ic.Lock, "صلاحية الوصول للملفات", if (Perm.granted) "مفعّلة" else "مش مفعّلة", onClick = { Ctl.requestAccess() })
         }
     }

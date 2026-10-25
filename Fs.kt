@@ -9,6 +9,8 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
+import android.os.ParcelFileDescriptor
+import android.graphics.pdf.PdfRenderer
 import android.os.StatFs
 import android.provider.MediaStore
 import android.util.LruCache
@@ -69,7 +71,7 @@ object FS {
             size = if (d) 0L else f.length(),
             modified = f.lastModified(),
             kind = if (d) Kind.FOLDER else kindOf(f.extension.lowercase()),
-            count = if (d) (f.list()?.size ?: 0) else 0
+            count = -1
         )
     }
 
@@ -183,7 +185,17 @@ object FS {
             src.listFiles()?.forEach { copyTree(it, File(dst, it.name)) }
         } else {
             dst.parentFile?.mkdirs()
-            src.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o, 128 * 1024) } }
+            src.inputStream().use { i ->
+                dst.outputStream().use { o ->
+                    val b = ByteArray(128 * 1024)
+                    while (true) {
+                        val r = i.read(b)
+                        if (r < 0) break
+                        o.write(b, 0, r)
+                        Prog.add(r.toLong())
+                    }
+                }
+            }
             dst.setLastModified(src.lastModified())
         }
     }
@@ -191,7 +203,12 @@ object FS {
     fun moveExact(src: File, target: File) {
         target.parentFile?.mkdirs()
         if (!src.renameTo(target)) {
-            copyTree(src, target)
+            try {
+                copyTree(src, target)
+            } catch (e: Exception) {
+                target.deleteRecursively()
+                throw e
+            }
             if (!src.deleteRecursively()) throw IOException("تعذر حذف الأصل بعد النقل")
         }
     }
@@ -199,7 +216,12 @@ object FS {
     fun copy(src: File, dstDir: File): File {
         checkNotInside(src, dstDir)
         val t = unique(dstDir, src.name, src.isDirectory)
-        copyTree(src, t)
+        try {
+            copyTree(src, t)
+        } catch (e: Exception) {
+            t.deleteRecursively()
+            throw e
+        }
         return t
     }
 
@@ -228,13 +250,45 @@ object FS {
                     }
                 } else if (used.add(name)) {
                     z.putNextEntry(ZipEntry(name))
-                    f.inputStream().use { it.copyTo(z) }
+                    f.inputStream().use { i ->
+                        val b = ByteArray(64 * 1024)
+                        while (true) {
+                            val r = i.read(b)
+                            if (r < 0) break
+                            z.write(b, 0, r)
+                            Prog.add(r.toLong())
+                        }
+                    }
                     z.closeEntry()
                 }
             }
             files.forEach { add(it, "") }
         }
     }
+
+    // ---------- معاينة المجلد (بتتحمّل بس للعناصر الظاهرة وبتتخزن) ----------
+    class FolderPeek(val count: Int, val names: List<String>, val kinds: List<Kind>)
+
+    private val peekCache = LruCache<String, FolderPeek>(800)
+
+    fun peekCached(f: File): FolderPeek? = peekCache.get(f.path + "|" + f.lastModified())
+
+    fun peek(dir: File, hidden: Boolean): FolderPeek {
+        val key = dir.path + "|" + dir.lastModified()
+        peekCache.get(key)?.let { return it }
+        val all = (dir.list() ?: emptyArray()).filter { hidden || !it.startsWith(".") }
+        val first = all.sortedWith(String.CASE_INSENSITIVE_ORDER).take(3)
+        val kinds = first.map {
+            val c = File(dir, it)
+            if (c.isDirectory) Kind.FOLDER else kindOf(c.extension.lowercase())
+        }
+        val r = FolderPeek(all.size, first, kinds)
+        peekCache.put(key, r)
+        return r
+    }
+
+    // ---------- تصفح ملف zip من غير فك ----------
+    class ZEntry(val name: String, val size: Long, val packed: Long, val time: Long, val isDir: Boolean)
 
     fun unzip(zip: File, dest: File) {
         dest.mkdirs()
@@ -457,7 +511,7 @@ object TrashBin {
     }
 
     @Synchronized
-    fun put(f: File) {
+    fun put(f: File): String {
         dir.mkdirs()
         val id = UUID.randomUUID().toString()
         val isDir = f.isDirectory
@@ -470,6 +524,7 @@ object TrashBin {
                 .put("dir", isDir).put("size", size).put("date", System.currentTimeMillis())
         )
         write(a)
+        return id
     }
 
     private fun removeFromIndex(id: String) {
@@ -500,6 +555,13 @@ object TrashBin {
     }
 
     @Synchronized
+    fun purgeOld(days: Int) {
+        if (days <= 0) return
+        val limit = System.currentTimeMillis() - days * 86_400_000L
+        list().filter { it.date < limit }.forEach { purge(it) }
+    }
+
+    @Synchronized
     fun empty() {
         dir.listFiles()?.forEach { it.deleteRecursively() }
         write(JSONArray())
@@ -519,6 +581,8 @@ object Thumbs {
                 Kind.IMAGE -> decode(f, px)
                 Kind.VIDEO -> video(f, px)
                 Kind.APK -> apk(ctx, f, px)
+                Kind.AUDIO -> audio(f, px)
+                Kind.DOC -> if (f.extension.equals("pdf", true)) pdf(f, px) else null
                 else -> null
             }
         } catch (e: Throwable) {
@@ -558,6 +622,49 @@ object Thumbs {
                 r.release()
             } catch (e: Exception) {
             }
+        }
+    }
+
+    private fun audio(f: File, px: Int): Bitmap? {
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(f.path)
+            val b = r.embeddedPicture ?: return null
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(b, 0, b.size, o)
+            var s = 1
+            while (o.outWidth / (s * 2) >= px && o.outHeight / (s * 2) >= px) s *= 2
+            return BitmapFactory.decodeByteArray(b, 0, b.size, BitmapFactory.Options().apply { inSampleSize = s })
+        } finally {
+            try {
+                r.release()
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    private fun pdf(f: File, px: Int): Bitmap? {
+        val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val rd = PdfRenderer(pfd)
+            try {
+                if (rd.pageCount == 0) return null
+                val pg = rd.openPage(0)
+                try {
+                    val w = px
+                    val h = (px * pg.height.toFloat() / pg.width).toInt().coerceIn(1, px * 2)
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    bmp.eraseColor(android.graphics.Color.WHITE)
+                    pg.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    return bmp
+                } finally {
+                    pg.close()
+                }
+            } finally {
+                rd.close()
+            }
+        } finally {
+            pfd.close()
         }
     }
 

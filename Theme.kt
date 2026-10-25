@@ -169,7 +169,11 @@ fun AppTheme(content: @Composable () -> Unit) {
             surfaceContainerHigh = Color(0xFF1A1A1A), surfaceContainerHighest = Color(0xFF222222)
         )
     }
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+    val dens = androidx.compose.ui.platform.LocalDensity.current
+    CompositionLocalProvider(
+        LocalLayoutDirection provides LayoutDirection.Rtl,
+        androidx.compose.ui.platform.LocalDensity provides Density(dens.density, dens.fontScale * Prefs.fontScale())
+    ) {
         MaterialTheme(colorScheme = cs, typography = AppType, content = content)
     }
 }
