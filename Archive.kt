@@ -91,7 +91,7 @@ object Arc {
                 "7z" -> sevenOpen(f, pwd).use { sz ->
                     val l = ArrayList<FS.ZEntry>()
                     for (e in sz.entries) {
-                        val t = if (e.hasLastModifiedDate()) e.lastModifiedDate.time else 0L
+                        val t = if (e.hasLastModifiedDate) e.lastModifiedDate.time else 0L
                         l.add(FS.ZEntry(dirName(e.name, e.isDirectory), e.size, 0, t, e.isDirectory))
                     }
                     Listing(l, false)
