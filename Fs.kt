@@ -48,7 +48,7 @@ object FS {
     private const val COL_DATA = MediaStore.Files.FileColumns.DATA
     private const val COL_SIZE = MediaStore.Files.FileColumns.SIZE
     private const val COL_DATE = MediaStore.Files.FileColumns.DATE_MODIFIED
-    private const val COL_FORMAT = MediaStore.Files.FileColumns.FORMAT
+    private const val COL_FORMAT = "format"
 
     fun kindOf(ext: String): Kind = when {
         ext in IMG -> Kind.IMAGE
