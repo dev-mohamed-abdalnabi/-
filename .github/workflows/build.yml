@@ -1,0 +1,77 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assemble project structure from flat files
+        run: |
+          set -e
+          J=app/src/main/java/com/next/files
+          R=app/src/main/res
+          mkdir -p $J $R/values $R/xml $R/drawable $R/mipmap-anydpi-v26 $R/font
+          mv -f *.kt $J/
+          mv -f AndroidManifest.xml app/src/main/
+          mv -f themes.xml strings.xml colors.xml $R/values/
+          mv -f file_paths.xml $R/xml/
+          mv -f ic_fg.xml $R/drawable/
+          mv -f ic_launcher.xml ic_launcher_round.xml $R/mipmap-anydpi-v26/
+          mv -f app.build.gradle.kts app/build.gradle.kts
+          base64 -d release.jks.b64 > app/release.jks
+          find . -path ./.git -prune -o -type f -print | sort
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      - name: Download Tajawal fonts
+        run: |
+          cd app/src/main/res/font
+          for w in Regular Medium Bold ExtraBold; do
+            n=$(echo "$w" | tr 'A-Z' 'a-z')
+            curl -fsSL --retry 5 --retry-delay 3 -o "tajawal_$n.ttf" \
+              "https://raw.githubusercontent.com/google/fonts/main/ofl/tajawal/Tajawal-$w.ttf"
+          done
+          ls -la
+
+      - name: Build release APK
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk "NextFiles-build-${{ github.run_number }}.apk"
+
+      - name: Upload APK (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NextFiles-APK
+          path: NextFiles-build-*.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Next Files - build ${{ github.run_number }}
+          body: "APK جاهز للتحميل والتثبيت. حمّل الملف NextFiles-build-${{ github.run_number }}.apk"
+          files: NextFiles-build-*.apk
+          make_latest: true
