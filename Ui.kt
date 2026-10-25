@@ -25,9 +25,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -168,12 +169,12 @@ fun FolderArt(modifier: Modifier = Modifier, badge: ImageVector? = null, sheets:
 }
 
 @Composable
-fun FileThumb(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier) {
+fun FileThumb(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier, plain: Boolean = false) {
     if (item.isDir) Box(modifier.size(size), contentAlignment = Alignment.Center) {
         val pk = rememberPeek(item)
         FolderArt(Modifier.size(size * 0.84f), if (pk == null || pk.kinds.isEmpty()) folderBadge(item.name) else null,
             pk?.kinds?.map { kindColor(it) } ?: emptyList())
-    } else FileThumbTile(item, size, radius, modifier)
+    } else FileThumbTile(item, size, radius, modifier, plain)
 }
 
 @Composable
@@ -236,29 +237,29 @@ fun hasReal(i: FileItem): Boolean =
         (i.kind == Kind.DOC && i.ext == "pdf")
 
 @Composable
-fun TypeTile(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier) {
+fun TypeTile(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier, plain: Boolean = false) {
     val c = typeColor(item)
     val label = size >= 48.dp && item.ext.isNotEmpty()
     Box(
-        modifier.size(size).clip(RoundedCornerShape(radius)).background(c.copy(alpha = 0.16f)),
+        if (plain) modifier.size(size) else modifier.size(size).clip(RoundedCornerShape(radius)).background(c.copy(alpha = 0.16f)),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             iconFor(item.kind), null,
-            Modifier.size(size * 0.44f).offset(y = if (label) -(size * 0.07f) else 0.dp), tint = c
+            Modifier.size(size * (if (plain) 0.58f else 0.44f)).offset(y = if (label) -(size * (if (plain) 0.137f else 0.07f)) else 0.dp), tint = c
         )
         if (label) {
             Text(
-                item.ext.uppercase().take(4), Modifier.align(Alignment.BottomCenter).padding(bottom = size * 0.07f),
+                item.ext.uppercase().take(4), Modifier.align(Alignment.BottomCenter).padding(bottom = size * (if (plain) 0.07f else 0.07f)),
                 color = c, maxLines = 1,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = (size.value * 0.15f).coerceAtLeast(8f).sp)
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = (size.value * (if (plain) 0.18f else 0.15f)).coerceAtLeast(8f).sp)
             )
         }
     }
 }
 
 @Composable
-private fun FileThumbTile(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier) {
+private fun FileThumbTile(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier, plain: Boolean = false) {
     val ctx = LocalContext.current
     val real = hasReal(item)
     val px = if (size > 90.dp) 384 else 256
@@ -270,17 +271,17 @@ private fun FileThumbTile(item: FileItem, size: Dp, radius: Dp, modifier: Modifi
         val apk = item.kind == Kind.APK
         Box(
             modifier.size(size).clip(RoundedCornerShape(radius))
-                .background(if (apk) typeColor(item).copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.06f))
+                .background(if (plain) Color.Transparent else if (apk) typeColor(item).copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.06f))
         ) {
             Image(
                 b.asImageBitmap(), null,
-                Modifier.fillMaxSize().then(if (apk) Modifier.padding(size * 0.14f) else Modifier),
+                Modifier.fillMaxSize().then(if (apk && !plain) Modifier.padding(size * 0.14f) else Modifier),
                 contentScale = if (apk) ContentScale.Fit else ContentScale.Crop,
                 alignment = if (item.kind == Kind.DOC) Alignment.TopCenter else Alignment.Center
             )
         }
     } else {
-        TypeTile(item, size, radius, modifier)
+        TypeTile(item, size, radius, modifier, plain)
     }
 }
 
@@ -332,18 +333,27 @@ fun FileRow(
 }
 
 @Composable
-fun FileCard(item: FileItem, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
+fun FileCard(item: FileItem, selected: Boolean, onClick: () -> Unit, onLong: () -> Unit, dense: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
             .background(if (selected) cs.primaryContainer.copy(alpha = 0.6f) else Color.Transparent)
-            .combinedClickable(onClick = onClick, onLongClick = onLong).padding(6.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLong).padding(if (dense) 2.dp else 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp))) {
-                BoxFill(item)
+        Box(Modifier.fillMaxWidth()) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val s = maxWidth * (if (dense) 0.85f else 0.7f)
+                val h = s * 0.8f
+                Box(Modifier.fillMaxWidth().height(h), contentAlignment = Alignment.Center) {
+                    if (item.isDir) {
+                        val pk = rememberPeek(item)
+                        FolderArt(Modifier.align(Alignment.TopCenter).requiredSize(s).offset(y = -(s * 0.10f)),
+                            if (pk == null || pk.kinds.isEmpty()) folderBadge(item.name) else null,
+                            pk?.kinds?.map { kindColor(it) } ?: emptyList())
+                    } else FileThumb(item, h, h * 0.2f, plain = true)
+                }
             }
             if (selected) SelCheck(Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
@@ -356,18 +366,6 @@ fun FileCard(item: FileItem, selected: Boolean, onClick: () -> Unit, onLong: () 
             folderSubtitle(item, short = true), maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant
         )
-    }
-}
-
-@Composable
-private fun BoxFill(item: FileItem) {
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (item.isDir) {
-            val pk = rememberPeek(item)
-            FolderArt(Modifier.size(maxWidth * 0.7f), if (pk == null || pk.kinds.isEmpty()) folderBadge(item.name) else null,
-                pk?.kinds?.map { kindColor(it) } ?: emptyList())
-        }
-        else FileThumb(item, maxWidth, 22.dp)
     }
 }
 

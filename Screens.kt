@@ -305,12 +305,13 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
         else Ctl.open(i.file, shown.filter { !it.isDir }.map { it.file })
     }
 
+    val denseGrid = Prefs.grid && Prefs.viewSize == 1
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                GridCells.Fixed(if (Prefs.grid) listOf(4, 3, 2)[Prefs.viewSize.coerceIn(0, 2)] else 1), Modifier.fillMaxSize().imePadding(),
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = bottom),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)
+                GridCells.Fixed(if (Prefs.grid) listOf(4, 4, 2)[Prefs.viewSize.coerceIn(0, 2)] else 1), Modifier.fillMaxSize().imePadding(),
+                contentPadding = PaddingValues(start = if (denseGrid) 8.dp else 14.dp, end = if (denseGrid) 8.dp else 14.dp, bottom = bottom),
+                horizontalArrangement = Arrangement.spacedBy(if (denseGrid) 2.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(if (Prefs.grid) 2.dp else 4.dp)
             ) {
                 val full: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
                 item(span = full) {
@@ -420,7 +421,7 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                 }
                 if (Prefs.grid) {
                     items(shown, key = { it.file.path }) { i ->
-                        FileCard(i, i.file.path in sel, { click(i) }, { if (!selecting) toggle(i) })
+                        FileCard(i, i.file.path in sel, { click(i) }, { if (!selecting) toggle(i) }, dense = denseGrid)
                     }
                 } else {
                     items(shown, key = { it.file.path }, span = { GridItemSpan(maxLineSpan) }) { i ->
