@@ -56,7 +56,15 @@ jobs:
           ls -la
 
       - name: Build release APK
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+        run: |
+          gradle :app:assembleRelease --no-daemon --console=plain > build.log 2>&1 && ok=1 || ok=0
+          if [ "$ok" = "0" ]; then
+            echo "=========== الاخطاء المهمة ==========="
+            grep -nE "^e: |error:|What went wrong|Caused by|Execution failed|AAPT|not found|Could not" build.log | head -30
+            echo "=========== اخر 25 سطر ==========="
+            tail -25 build.log
+            exit 1
+          fi
 
       - name: Name the APK
         run: cp app/build/outputs/apk/release/app-release.apk "NextFiles-build-${{ github.run_number }}.apk"
