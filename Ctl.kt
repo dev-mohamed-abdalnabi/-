@@ -489,14 +489,16 @@ object Ctl {
         }
     }
 
-    fun batchRename(files: List<File>, pattern: String, start: Int, keepExt: Boolean) {
+    fun batchRename(files: List<File>, pattern: String, start: Int, newExt: String?) {
         if (files.any { SafFs.usesSaf(it) }) { toast("إعادة التسمية الجماعية مش متاحة جوه Android/data"); return }
         if (files.isEmpty() || pattern.isBlank()) { toast("اكتب نمط الاسم"); return }
         val width = pattern.count { it == '#' }.coerceAtLeast(1)
         val plan = files.mapIndexed { i, f ->
             val num = (start + i).toString().padStart(width, '0')
             val base = if (pattern.contains('#')) pattern.replace(Regex("#+"), num) else pattern + num
-            val ext = if (keepExt && f.isFile && f.extension.isNotEmpty()) "." + f.extension else ""
+            val ext = if (!f.isFile) ""
+                else if (newExt != null) "." + newExt
+                else if (f.extension.isNotEmpty()) "." + f.extension else ""
             f to File(f.parentFile, base.trim() + ext)
         }
         val srcPaths = files.map { it.path }.toSet()

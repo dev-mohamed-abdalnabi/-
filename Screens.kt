@@ -470,6 +470,8 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                         Prefs.save(); sel.clear(); Ctl.toast("اتضافت للمفضلة")
                     },
                     onTab = { selFiles().firstOrNull { it.isDirectory }?.let { Ctl.newTab(it) }; sel.clear() },
+                    canRenameOne = sel.size == 1,
+                    onRenameOne = { selFiles().singleOrNull()?.let { d.rename = it }; sel.clear() },
                     canOpenWith = sel.size == 1 && selFiles().singleOrNull()?.isDirectory == false,
                     onOpenWith = { selFiles().singleOrNull()?.takeIf { !it.isDirectory }?.let { Ctl.openWith(it) }; sel.clear() },
                     modifier = Modifier

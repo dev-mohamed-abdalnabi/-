@@ -28,6 +28,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -476,6 +477,7 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
                  onZip: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit,
                  onRename: () -> Unit, onInvert: () -> Unit, onFav: () -> Unit, onTab: () -> Unit,
                  canOpenWith: Boolean = false, onOpenWith: () -> Unit = {},
+                 canRenameOne: Boolean = false, onRenameOne: () -> Unit = {},
                  modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     var more by remember { mutableStateOf(false) }
@@ -518,7 +520,8 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
                     // "فتح بتطبيق تاني" بيشتغل مع ملف واحد بس (ACTION_VIEW مبيدعمش أكتر من ملف)
                     mi(if (canOpenWith) "فتح بتطبيق تاني" else "فتح بتطبيق تاني (اختار ملف واحد)", Ic.File, canOpenWith, onOpenWith)
                     mi("تحديد عكسي", Ic.Sort, true, onInvert)
-                    mi("إعادة تسمية جماعية", Ic.Edit, true, onRename)
+                    mi("إعادة تسمية", Ic.Edit, canRenameOne, onRenameOne)
+                    mi(if (count > 1) "إعادة تسمية جماعية" else "إعادة تسمية جماعية (اختار أكتر من ملف)", Ic.Edit, count > 1, onRename)
                     mi("إضافة للمفضلة", Ic.StarFill, true, onFav)
                     mi("فتح المجلد في تاب جديد", Ic.Folder, true, onTab)
                 }
@@ -592,33 +595,113 @@ private fun ZipDialog(initial: String, onDismiss: () -> Unit, onOk: (String, Str
     }
 }
 
+/** الامتدادات الموجودة فعلًا في نفس المجلد (علشان تختار منها) + امتدادات الملفات نفسها. */
+private fun existingExts(files: List<File>): List<String> {
+    val out = LinkedHashSet<String>()
+    files.forEach { if (it.isFile && it.extension.isNotEmpty()) out.add(it.extension) }
+    val dirs = files.mapNotNull { it.parentFile }.distinct().filter { !SafFs.usesSaf(it) }
+    for (d in dirs) {
+        try {
+            d.listFiles()?.asSequence()?.filter { it.isFile && it.extension.isNotEmpty() }
+                ?.map { it.extension.lowercase() }?.distinct()?.sorted()?.take(40)?.forEach { out.add(it) }
+        } catch (e: Exception) { }
+    }
+    return out.take(30).toList()
+}
+
+private fun cleanExt(s: String): String = s.trim().removePrefix(".").filter { it != '/' && it != '\\' }.trim()
+
+/** خانة الامتداد: اكتب بإيدك أو اختار من الامتدادات الموجودة. */
 @Composable
-private fun BatchDialog(count: Int, onDismiss: () -> Unit, onOk: (String, Int, Boolean) -> Unit) {
+private fun ExtPicker(ext: String, onExt: (String) -> Unit, options: List<String>, hint: String) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TextField(
+            ext, { onExt(it.filter { c -> c != '/' && c != '\\' }.take(12)) }, singleLine = true,
+            shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+            label = { Text("الامتداد (الصيغة)") }, placeholder = { Text(hint) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (options.isNotEmpty()) Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            options.forEach { o ->
+                val sel = cleanExt(ext).equals(o, true)
+                Text(
+                    ".$o", style = MaterialTheme.typography.labelLarge,
+                    color = if (sel) cs.onPrimary else cs.onPrimaryContainer,
+                    modifier = Modifier.clip(RoundedCornerShape(50))
+                        .background(if (sel) cs.primary else cs.surface.copy(alpha = 0.5f))
+                        .clickable { onExt(if (sel) "" else o) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatchDialog(files: List<File>, onDismiss: () -> Unit, onOk: (String, Int, String?) -> Unit) {
     var pat by remember { mutableStateOf("ملف_###") }
     var start by remember { mutableStateOf("1") }
-    var keep by remember { mutableStateOf(true) }
+    var ext by remember { mutableStateOf("") }
+    val opts = remember(files) { existingExts(files) }
     val cs = MaterialTheme.colorScheme
     BottomBar(onDismiss) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = BarMinHeight)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("تسمية $count", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
-            TextField(pat, { pat = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                label = { Text("النمط (كل # رقم)") }, modifier = Modifier.width(170.dp))
-            TextField(start, { start = it.filter { c -> c.isDigit() }.take(6) }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                label = { Text("يبدأ من") }, modifier = Modifier.width(100.dp))
-            Row(Modifier.clickable { keep = !keep }, verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.material3.Checkbox(keep, { keep = it })
-                Text("سيب الامتداد", color = cs.onPrimaryContainer)
+            Text("إعادة تسمية ${files.size} عنصر", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextField(pat, { pat = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                    label = { Text("النمط (كل # رقم)") }, modifier = Modifier.weight(1f))
+                TextField(start, { start = it.filter { c -> c.isDigit() }.take(6) }, singleLine = true,
+                    shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                    label = { Text("يبدأ من") }, modifier = Modifier.width(100.dp))
             }
-            TextButton({ onOk(pat, start.toIntOrNull() ?: 1, keep); onDismiss() }) { Text("تغيير") }
-            TextButton(onDismiss) { Text("إلغاء") }
+            ExtPicker(ext, { ext = it }, opts, "سيبه فاضي علشان كل ملف يفضل بامتداده")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    { onOk(pat, start.toIntOrNull() ?: 1, cleanExt(ext).ifEmpty { null }); onDismiss() },
+                    Modifier.weight(1f)
+                ) { Text("تطبيق") }
+                TextButton(onDismiss) { Text("إلغاء") }
+            }
+        }
+    }
+}
+
+/** إعادة تسمية ملف واحد: الاسم لوحده + الامتداد لوحده (كتابة أو اختيار). */
+@Composable
+private fun RenameDialog(f: File, onDismiss: () -> Unit, onOk: (String) -> Unit) {
+    val isFile = !f.isDirectory
+    var name by remember { mutableStateOf(if (isFile) f.nameWithoutExtension else f.name) }
+    var ext by remember { mutableStateOf(if (isFile) f.extension else "") }
+    val opts = remember(f) { if (isFile) existingExts(listOf(f)) else emptyList() }
+    val cs = MaterialTheme.colorScheme
+    val fr = rememberAutoFocus()
+    BottomBar(onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("إعادة تسمية", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+            TextField(
+                name, { name = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                label = { Text("الاسم") }, modifier = Modifier.fillMaxWidth().focusRequester(fr)
+            )
+            if (isFile) ExtPicker(ext, { ext = it }, opts, "سيبه فاضي علشان الملف يبقى من غير امتداد")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button({
+                    val e = cleanExt(ext)
+                    onOk(if (isFile && e.isNotEmpty()) "${name.trim()}.$e" else name.trim()); onDismiss()
+                }, Modifier.weight(1f)) { Text("تطبيق") }
+                TextButton(onDismiss) { Text("إلغاء") }
+            }
         }
     }
 }
@@ -627,7 +710,7 @@ private fun BatchDialog(count: Int, onDismiss: () -> Unit, onOk: (String, Int, B
 fun Dialogs(d: DlgState) {
     ArchiveDialogs()
     d.rename?.let { f ->
-        NameDialog("إعادة تسمية", f.name, "تغيير", { d.rename = null }) { Ctl.rename(f, it) }
+        RenameDialog(f, { d.rename = null }) { Ctl.rename(f, it) }
     }
     d.mkdir?.let { dir ->
         NameDialog("مجلد جديد", "", "إنشاء", { d.mkdir = null }) { Ctl.mkdir(dir, it) }
@@ -639,7 +722,7 @@ fun Dialogs(d: DlgState) {
         val base = if (files.size == 1) files[0].nameWithoutExtension else "أرشيف"
         ZipDialog(base, { d.zip = null }) { n, p, f -> Ctl.zip(files, n, p, f) }
     }
-    d.batch?.let { files -> BatchDialog(files.size, { d.batch = null }) { pat, start, keep -> Ctl.batchRename(files, pat, start, keep) } }
+    d.batch?.let { files -> BatchDialog(files, { d.batch = null }) { pat, start, ext -> Ctl.batchRename(files, pat, start, ext) } }
     d.del?.let { files ->
         val cs = MaterialTheme.colorScheme
         BottomBar({ d.del = null }, color = cs.errorContainer) {
