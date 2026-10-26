@@ -287,7 +287,8 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
     val shown = results ?: items
     val needSaf = remember(dir.path, Ctl.rev) { SafFs.subOf(dir)?.takeIf { Saf.treeOf(ctx, it) == null } }
     val selecting = sel.isNotEmpty()
-    BackHandler(enabled = selecting || searching || q.isNotEmpty() || !atRoot) {
+    // لازم يتعطل لما فيه شاشة مفتوحة فوق (صورة/فيديو/...) وإلا هياخد زرار الرجوع بدالها
+    BackHandler(enabled = Ctl.stack.isEmpty() && (selecting || searching || q.isNotEmpty() || !atRoot)) {
         when {
             selecting -> sel.clear()
             searching || q.isNotEmpty() -> { q = ""; searching = false }
