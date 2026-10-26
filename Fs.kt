@@ -281,7 +281,7 @@ object FS {
     }
 
     // ---------- معاينة المجلد (بتتحمّل بس للعناصر الظاهرة وبتتخزن) ----------
-    class FolderPeek(val count: Int, val names: List<String>, val kinds: List<Kind>)
+    class FolderPeek(val count: Int, val names: List<String>, val kinds: List<Kind>, val files: List<File> = emptyList())
 
     private val peekCache = LruCache<String, FolderPeek>(800)
 
@@ -293,12 +293,16 @@ object FS {
         val key = dir.path + "|" + dir.lastModified()
         peekCache.get(key)?.let { return it }
         val all = (dir.list() ?: emptyArray()).filter { hidden || !it.startsWith(".") }
-        val first = all.sortedWith(String.CASE_INSENSITIVE_ORDER).take(3)
-        val kinds = first.map {
-            val c = File(dir, it)
-            if (c.isDirectory) Kind.FOLDER else kindOf(c.extension.lowercase())
+        // بنفضّل نعرض الصور/الفيديو/PDF/APK (ليها معاينة حقيقية) وبعدها باقي الملفات وبعدها المجلدات
+        fun rank(f: File): Int {
+            if (f.isDirectory) return 2
+            val k = kindOf(f.extension.lowercase())
+            return if (k == Kind.IMAGE || k == Kind.VIDEO || k == Kind.APK || (k == Kind.DOC && f.extension.equals("pdf", true))) 0 else 1
         }
-        val r = FolderPeek(all.size, first, kinds)
+        val picked = all.sortedWith(String.CASE_INSENSITIVE_ORDER).take(60).map { File(dir, it) }.sortedBy { rank(it) }.take(3)
+        val first = picked.map { it.name }
+        val kinds = picked.map { if (it.isDirectory) Kind.FOLDER else kindOf(it.extension.lowercase()) }
+        val r = FolderPeek(all.size, first, kinds, picked)
         peekCache.put(key, r)
         return r
     }

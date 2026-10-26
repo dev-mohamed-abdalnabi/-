@@ -119,6 +119,8 @@ fun HomeScreen(bottom: Dp) {
     var vols by remember { mutableStateOf(Ctl.volsCache) }
     var counts by remember { mutableStateOf(Ctl.homeCounts) }
     var trashN by remember { mutableStateOf(Ctl.homeTrash) }
+    var refreshing by remember { mutableStateOf(false) }
+    val pullState = rememberPullToRefreshState()
     LaunchedEffect(Ctl.rev, Prefs.showHidden) {
         withContext(Dispatchers.IO) {
             vols = FS.volumes(ctx)
@@ -129,8 +131,21 @@ fun HomeScreen(bottom: Dp) {
             trashN = TrashBin.list().size
             Ctl.homeTrash = trashN
         }
+        if (refreshing) { delay(350); refreshing = false }
     }
     Glow {
+      PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = { refreshing = true; Ctl.bump() },
+        modifier = Modifier.fillMaxSize(),
+        state = pullState,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullState, isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+            )
+        }
+      ) {
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = bottom),
@@ -226,6 +241,7 @@ fun HomeScreen(bottom: Dp) {
             item { QuickRow(Ic.Share, "نقل لاسلكي", "اتصفح وانقل ملفاتك من الكمبيوتر عبر الواي فاي") { Ctl.push(Overlay.Wifi) } }
             item { QuickRow(Ic.Lock, "الخزنة المشفرة", "ملفاتك الخاصة بباسورد وتشفير AES-256") { Ctl.push(Overlay.Safe) } }
         }
+      }
     }
 }
 
@@ -660,15 +676,9 @@ fun TrashScreen() {
                         Modifier.fillMaxWidth().padding(6.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        if (e.isDir) Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) { FolderArt(Modifier.size(48.dp)) } else Box(
-                            Modifier.size(56.dp).clip(RoundedCornerShape(16.dp))
-                                .background(if (e.isDir) cs.primaryContainer else cs.secondaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                if (e.isDir) Ic.Folder else iconFor(FS.kindOf(File(e.name).extension.lowercase())), null,
-                                Modifier.size(26.dp), tint = if (e.isDir) cs.onPrimaryContainer else cs.onSecondaryContainer
-                            )
+                        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                            if (e.isDir) FolderArt(Modifier.size(48.dp))
+                            else FileTypeArt(File(e.name).extension.lowercase(), FS.kindOf(File(e.name).extension.lowercase()), Modifier.size(48.dp))
                         }
                         Column(Modifier.weight(1f)) {
                             Text(e.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)

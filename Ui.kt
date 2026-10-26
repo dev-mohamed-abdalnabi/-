@@ -156,51 +156,11 @@ fun FloatingNav(sel: Int, onFilesDouble: () -> Unit = {}, on: (Int) -> Unit) {
     }
 }
 
-private fun Path.q(x0: Float, y0: Float, cx: Float, cy: Float, x1: Float, y1: Float) =
-    cubicTo(x0 + 2f / 3f * (cx - x0), y0 + 2f / 3f * (cy - y0), x1 + 2f / 3f * (cx - x1), y1 + 2f / 3f * (cy - y1), x1, y1)
-
-@Composable
-fun FolderArt(modifier: Modifier = Modifier, badge: ImageVector? = null, sheets: List<Color> = emptyList()) {
-    val cs = MaterialTheme.colorScheme
-    val back = cs.primary
-    val front = lerp(cs.primary, Color.White, 0.55f).copy(alpha = 0.92f)
-    BoxWithConstraints(modifier) {
-    Canvas(Modifier.fillMaxSize()) {
-        val k = size.minDimension / 100f
-        val b = Path().apply {
-            moveTo(8 * k, 22 * k); q(8 * k, 22 * k, 8 * k, 14 * k, 16 * k, 14 * k)
-            lineTo(38 * k, 14 * k); q(38 * k, 14 * k, 42 * k, 14 * k, 45 * k, 18 * k)
-            lineTo(48 * k, 22 * k); lineTo(84 * k, 22 * k); q(84 * k, 22 * k, 92 * k, 22 * k, 92 * k, 30 * k)
-            lineTo(92 * k, 78 * k); q(92 * k, 78 * k, 92 * k, 86 * k, 84 * k, 86 * k)
-            lineTo(16 * k, 86 * k); q(16 * k, 86 * k, 8 * k, 86 * k, 8 * k, 78 * k); close()
-        }
-        val f = Path().apply {
-            moveTo(12 * k, 54 * k); q(12 * k, 54 * k, 12 * k, 48 * k, 18 * k, 47.5f * k)
-            lineTo(88 * k, 42 * k); q(88 * k, 42 * k, 95 * k, 41.5f * k, 94.5f * k, 48 * k)
-            lineTo(89 * k, 80 * k); q(89 * k, 80 * k, 88 * k, 87 * k, 81 * k, 87 * k)
-            lineTo(18 * k, 87 * k); q(18 * k, 87 * k, 11 * k, 87 * k, 12 * k, 80 * k); close()
-        }
-        drawPath(b, back)
-        sheets.take(3).forEachIndexed { i, c ->
-            drawRoundRect(
-                c.copy(alpha = 0.95f),
-                topLeft = androidx.compose.ui.geometry.Offset((18 + i * 24) * k, (26 - (if (i == 1) 4 else 0)) * k),
-                size = androidx.compose.ui.geometry.Size(20 * k, 30 * k),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4 * k, 4 * k)
-            )
-        }
-        drawPath(f, front)
-    }
-    if (badge != null) Icon(badge, null, Modifier.size(maxWidth * 0.3f).align(Alignment.Center).offset(y = maxHeight * 0.2f), tint = cs.primary)
-    }
-}
-
 @Composable
 fun FileThumb(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier, plain: Boolean = false) {
     if (item.isDir) Box(modifier.size(size), contentAlignment = Alignment.Center) {
         val pk = rememberPeek(item)
-        FolderArt(Modifier.size(size * 0.84f), if (pk == null || pk.kinds.isEmpty()) folderBadge(item.name) else null,
-            pk?.kinds?.map { kindColor(it) } ?: emptyList())
+        FolderArt(Modifier.size(size * 0.84f), folderBadge(item.name), pk)
     } else FileThumbTile(item, size, radius, modifier, plain)
 }
 
@@ -265,24 +225,7 @@ fun hasReal(i: FileItem): Boolean =
 
 @Composable
 fun TypeTile(item: FileItem, size: Dp, radius: Dp, modifier: Modifier = Modifier, plain: Boolean = false) {
-    val c = typeColor(item)
-    val label = size >= 48.dp && item.ext.isNotEmpty()
-    Box(
-        if (plain) modifier.size(size) else modifier.size(size).clip(RoundedCornerShape(radius)).background(c.copy(alpha = 0.16f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            iconFor(item.kind), null,
-            Modifier.size(size * (if (plain) 0.58f else 0.44f)).offset(y = if (label) -(size * (if (plain) 0.137f else 0.07f)) else 0.dp), tint = c
-        )
-        if (label) {
-            Text(
-                item.ext.uppercase().take(4), Modifier.align(Alignment.BottomCenter).padding(bottom = size * (if (plain) 0.07f else 0.07f)),
-                color = c, maxLines = 1,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = (size.value * (if (plain) 0.18f else 0.15f)).coerceAtLeast(8f).sp)
-            )
-        }
-    }
+    FileTypeArt(item.ext, item.kind, modifier.size(size), tag = true)
 }
 
 @Composable
@@ -377,8 +320,7 @@ fun FileCard(item: FileItem, selected: Boolean, onClick: () -> Unit, onLong: () 
                     if (item.isDir) {
                         val pk = rememberPeek(item)
                         FolderArt(Modifier.align(Alignment.TopCenter).requiredSize(s).offset(y = -(s * 0.10f)),
-                            if (pk == null || pk.kinds.isEmpty()) folderBadge(item.name) else null,
-                            pk?.kinds?.map { kindColor(it) } ?: emptyList())
+                            folderBadge(item.name), pk)
                     } else FileThumb(item, h, h * 0.2f, plain = true)
                 }
             }

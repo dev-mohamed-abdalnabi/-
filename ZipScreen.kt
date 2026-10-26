@@ -153,8 +153,10 @@ fun ZipScreen(path: String) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(c.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                            if (picked) SelCheck() else Icon(if (n.isDir) Ic.Folder else iconFor(kind), null, Modifier.size(22.dp), tint = c)
+                        Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                            if (picked) SelCheck()
+                            else if (n.isDir) FolderArt(Modifier.size(44.dp))
+                            else FileTypeArt(n.name.substringAfterLast('.', "").lowercase(), kind, Modifier.size(44.dp))
                         }
                         Column(Modifier.weight(1f)) {
                             Text(n.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
