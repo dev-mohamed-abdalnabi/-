@@ -611,10 +611,26 @@ private fun existingExts(files: List<File>): List<String> {
 
 private fun cleanExt(s: String): String = s.trim().removePrefix(".").filter { it != '/' && it != '\\' }.trim()
 
-/** خانة الامتداد: اكتب بإيدك أو اختار من الامتدادات الموجودة. */
+/** امتدادات جاهزة مقسّمة تصنيفات علشان الزحمة. */
+private val ExtGroups: List<Pair<String, List<String>>> = listOf(
+    "صور" to listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "svg", "ico", "tiff", "raw", "dng", "avif"),
+    "فيديو" to listOf("mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "3gp", "m4v", "ts", "mpg", "mpeg", "vob"),
+    "صوت" to listOf("mp3", "m4a", "wav", "flac", "aac", "ogg", "opus", "wma", "amr", "mid", "m4b", "aiff"),
+    "مستندات" to listOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "odt", "ods", "csv", "epub", "md"),
+    "أرشيف" to listOf("zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "iso", "cab"),
+    "كود" to listOf("html", "css", "js", "json", "xml", "kt", "java", "py", "c", "cpp", "h", "php", "sql", "sh", "yml", "ini", "log", "bat"),
+    "تطبيقات" to listOf("apk", "apks", "xapk", "aab", "exe", "msi", "dmg", "deb", "jar", "bak", "tmp")
+)
+
+/** خانة الامتداد: اكتب بإيدك أو اختار من الامتدادات (الموجودة أولًا، وبعدها تصنيفات). */
 @Composable
 private fun ExtPicker(ext: String, onExt: (String) -> Unit, options: List<String>, hint: String) {
     val cs = MaterialTheme.colorScheme
+    val groups = remember(options) {
+        (if (options.isNotEmpty()) listOf("الموجودة" to options) else emptyList()) + ExtGroups
+    }
+    var gi by remember(options) { mutableStateOf(0) }
+    val cur = groups[gi.coerceIn(0, groups.lastIndex)]
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         TextField(
             ext, { onExt(it.filter { c -> c != '/' && c != '\\' }.take(12)) }, singleLine = true,
@@ -622,85 +638,43 @@ private fun ExtPicker(ext: String, onExt: (String) -> Unit, options: List<String
             label = { Text("الامتداد (الصيغة)") }, placeholder = { Text(hint) },
             modifier = Modifier.fillMaxWidth()
         )
-        if (options.isNotEmpty()) Row(
+        // صف التصنيفات
+        Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            options.forEach { o ->
-                val sel = cleanExt(ext).equals(o, true)
+            groups.forEachIndexed { i, g ->
+                val on = i == gi
                 Text(
-                    ".$o", style = MaterialTheme.typography.labelLarge,
-                    color = if (sel) cs.onPrimary else cs.onPrimaryContainer,
+                    g.first, style = MaterialTheme.typography.labelMedium,
+                    color = if (on) cs.onSecondaryContainer else cs.onPrimaryContainer,
                     modifier = Modifier.clip(RoundedCornerShape(50))
-                        .background(if (sel) cs.primary else cs.surface.copy(alpha = 0.5f))
-                        .clickable { onExt(if (sel) "" else o) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .background(if (on) cs.secondaryContainer else Color.Transparent)
+                        .clickable { gi = i }
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun BatchDialog(files: List<File>, onDismiss: () -> Unit, onOk: (String, Int, String?) -> Unit) {
-    var pat by remember { mutableStateOf("ملف_###") }
-    var start by remember { mutableStateOf("1") }
-    var ext by remember { mutableStateOf("") }
-    val opts = remember(files) { existingExts(files) }
-    val cs = MaterialTheme.colorScheme
-    BottomBar(onDismiss) {
+        // صف الامتدادات بتاع التصنيف المختار (سطرين بيتحركوا أفقيًا مع بعض)
+        val rows = cur.second.chunked((cur.second.size + 1) / 2)
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("إعادة تسمية ${files.size} عنصر", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextField(pat, { pat = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                    label = { Text("النمط (كل # رقم)") }, modifier = Modifier.weight(1f))
-                TextField(start, { start = it.filter { c -> c.isDigit() }.take(6) }, singleLine = true,
-                    shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                    label = { Text("يبدأ من") }, modifier = Modifier.width(100.dp))
-            }
-            ExtPicker(ext, { ext = it }, opts, "سيبه فاضي علشان كل ملف يفضل بامتداده")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.Button(
-                    { onOk(pat, start.toIntOrNull() ?: 1, cleanExt(ext).ifEmpty { null }); onDismiss() },
-                    Modifier.weight(1f)
-                ) { Text("تطبيق") }
-                TextButton(onDismiss) { Text("إلغاء") }
-            }
-        }
-    }
-}
-
-/** إعادة تسمية ملف واحد: الاسم لوحده + الامتداد لوحده (كتابة أو اختيار). */
-@Composable
-private fun RenameDialog(f: File, onDismiss: () -> Unit, onOk: (String) -> Unit) {
-    val isFile = !f.isDirectory
-    var name by remember { mutableStateOf(if (isFile) f.nameWithoutExtension else f.name) }
-    var ext by remember { mutableStateOf(if (isFile) f.extension else "") }
-    val opts = remember(f) { if (isFile) existingExts(listOf(f)) else emptyList() }
-    val cs = MaterialTheme.colorScheme
-    val fr = rememberAutoFocus()
-    BottomBar(onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("إعادة تسمية", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
-            TextField(
-                name, { name = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                label = { Text("الاسم") }, modifier = Modifier.fillMaxWidth().focusRequester(fr)
-            )
-            if (isFile) ExtPicker(ext, { ext = it }, opts, "سيبه فاضي علشان الملف يبقى من غير امتداد")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.Button({
-                    val e = cleanExt(ext)
-                    onOk(if (isFile && e.isNotEmpty()) "${name.trim()}.$e" else name.trim()); onDismiss()
-                }, Modifier.weight(1f)) { Text("تطبيق") }
-                TextButton(onDismiss) { Text("إلغاء") }
+            rows.forEach { r ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    r.forEach { o ->
+                        val sel = cleanExt(ext).equals(o, true)
+                        Text(
+                            ".$o", style = MaterialTheme.typography.labelLarge,
+                            color = if (sel) cs.onPrimary else cs.onPrimaryContainer,
+                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                .background(if (sel) cs.primary else cs.surface.copy(alpha = 0.5f))
+                                .clickable { onExt(if (sel) "" else o) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
             }
         }
     }
