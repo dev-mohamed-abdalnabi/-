@@ -2,6 +2,19 @@
 
 package com.next.files
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -69,7 +82,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -420,6 +432,45 @@ fun ItemMenu(open: Boolean, dismiss: () -> Unit, item: FileItem, d: DlgState, sh
     }
 }
 
+/** ارتفاع موحّد لكل الأشرطة السفلية (لصق / إجراءات / ضغط / أرشيف / حذف...). */
+val BarMinHeight = 56.dp
+
+/**
+ * شريط سفلي موحّد: نفس العرض (12dp من الجنبين) ونفس المكان والشكل بتاع شريط اللصق.
+ * بيتحط فوق الشاشة مع خلفية شفافة؛ الضغط برّه الشريط أو زر الرجوع بيقفله.
+ */
+@Composable
+fun BottomBar(
+    onDismiss: () -> Unit,
+    color: Color = MaterialTheme.colorScheme.primaryContainer,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    BackHandler(onBack = onDismiss)
+    Box(
+        Modifier.fillMaxSize().clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss
+        )
+    ) {
+        Surface(
+            Modifier.align(Alignment.BottomCenter)
+                .then(if (imeOpen) Modifier.imePadding().padding(bottom = 12.dp) else Modifier.padding(bottom = nav + 92.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .fillMaxWidth()
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {}),
+            shape = RoundedCornerShape(28.dp), color = color, shadowElevation = 6.dp
+        ) { Column(content = content) }
+    }
+}
+
+@Composable
+fun rememberAutoFocus(): FocusRequester {
+    val fr = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(80); try { fr.requestFocus() } catch (e: Exception) { } }
+    return fr
+}
+
 @Composable
 fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () -> Unit, onShare: () -> Unit,
                  onZip: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit,
@@ -428,29 +479,35 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
     val cs = MaterialTheme.colorScheme
     var more by remember { mutableStateOf(false) }
     Surface(
-        modifier.padding(horizontal = 12.dp).padding(vertical = 4.dp).fillMaxWidth(),
+        modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth(),
         shape = RoundedCornerShape(28.dp), color = cs.secondaryContainer, shadowElevation = 6.dp
     ) {
+        // الأيقونات بتتوزع بالتساوي على كامل عرض الشريط (زي شريط اللصق) بدل ما تتلم في طرف.
         Row(
-            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().heightIn(min = BarMinHeight).padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             @Composable
             fun ib(ic: ImageVector, t: String, c: Color = cs.onSecondaryContainer, a: () -> Unit) =
-                IconButton(a, Modifier.size(36.dp)) { Icon(ic, t, Modifier.size(21.dp), tint = c) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    IconButton(a, Modifier.size(40.dp)) { Icon(ic, t, Modifier.size(22.dp), tint = c) }
+                }
             ib(Ic.Close, "إلغاء التحديد", a = onClose)
-            Text(
-                "$count", Modifier.padding(horizontal = 6.dp).widthIn(min = 18.dp),
-                style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer, maxLines = 1
-            )
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text(
+                    "$count", style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer, maxLines = 1
+                )
+            }
             ib(Ic.SelectAll, "تحديد الكل", a = onAll)
             ib(Ic.Copy, "نسخ", a = onCopy)
             ib(Ic.Cut, "قص", a = onCut)
             ib(Ic.Share, "مشاركة", a = onShare)
             ib(Ic.Archive, "ضغط", a = onZip)
             ib(Ic.Trash, "حذف", cs.error, onDelete)
-            Box {
-                ib(Ic.More, "المزيد") { more = true }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                IconButton({ more = true }, Modifier.size(40.dp)) {
+                    Icon(Ic.More, "المزيد", Modifier.size(22.dp), tint = cs.onSecondaryContainer)
+                }
                 DropdownMenu(more, { more = false }) {
                     @Composable
                     fun mi(t: String, ic: ImageVector, a: () -> Unit) = DropdownMenuItem(
@@ -469,19 +526,21 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
 @Composable
 private fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () -> Unit, onOk: (String) -> Unit) {
     var t by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(28.dp),
-        title = { Text(title, style = MaterialTheme.typography.titleLarge) },
-        text = {
+    val cs = MaterialTheme.colorScheme
+    val fr = rememberAutoFocus()
+    BottomBar(onDismiss) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = BarMinHeight).padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             TextField(
-                t, { t = it }, singleLine = true, shape = RoundedCornerShape(20.dp),
-                colors = fieldColors(), modifier = Modifier.fillMaxWidth()
+                t, { t = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                label = { Text(title) }, modifier = Modifier.weight(1f).focusRequester(fr)
             )
-        },
-        confirmButton = { TextButton({ onOk(t); onDismiss() }) { Text(confirm) } },
-        dismissButton = { TextButton(onDismiss) { Text("إلغاء") } }
-    )
+            TextButton({ onOk(t); onDismiss() }) { Text(confirm) }
+            IconButton(onDismiss, Modifier.size(40.dp)) { Icon(Ic.Close, "إلغاء", Modifier.size(22.dp), tint = cs.onPrimaryContainer) }
+        }
+    }
 }
 
 @Composable
@@ -491,52 +550,40 @@ private fun ZipDialog(initial: String, onDismiss: () -> Unit, onOk: (String, Str
     var p by remember { mutableStateOf("") }
     val cs = MaterialTheme.colorScheme
 
-    // شريط ضغط سفلي بدل نافذة حوار وسط الشاشة، بنفس مقاس ومكان أشرطة اللصق والإجراءات.
-    Popup(
-        alignment = Alignment.BottomCenter,
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.PopupProperties(focusable = true)
-    ) {
-        Surface(
+    // شريط ضغط سفلي بنفس عرض ومكان وشكل شريط اللصق (بلون مختلف).
+    BottomBar(onDismiss) {
+        Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .padding(bottom = 72.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = cs.primaryContainer,
-            shadowElevation = 6.dp
+                .heightIn(min = BarMinHeight)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("ضغط", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
-                Switcher(listOf("ZIP", "7z", "TAR.GZ"), fmt) { fmt = it }
-                TextField(
-                    value = n,
-                    onValueChange = { n = it },
-                    singleLine = true,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = fieldColors(),
-                    modifier = Modifier.width(150.dp),
-                    placeholder = { Text("اسم الملف") }
-                )
-                if (fmt == 0) TextField(
-                    value = p,
-                    onValueChange = { p = it },
-                    singleLine = true,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = fieldColors(),
-                    modifier = Modifier.width(170.dp),
-                    placeholder = { Text("باسورد اختياري") },
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
-                )
-                TextButton(onClick = { onOk(n, p, fmt); onDismiss() }) { Text("إنشاء") }
-                TextButton(onClick = onDismiss) { Text("إلغاء") }
-            }
+            Text("ضغط", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+            Switcher(listOf("ZIP", "7z", "TAR.GZ"), fmt) { fmt = it }
+            TextField(
+                value = n,
+                onValueChange = { n = it },
+                singleLine = true,
+                shape = RoundedCornerShape(20.dp),
+                colors = fieldColors(),
+                modifier = Modifier.width(150.dp),
+                placeholder = { Text("اسم الملف") }
+            )
+            if (fmt == 0) TextField(
+                value = p,
+                onValueChange = { p = it },
+                singleLine = true,
+                shape = RoundedCornerShape(20.dp),
+                colors = fieldColors(),
+                modifier = Modifier.width(170.dp),
+                placeholder = { Text("باسورد اختياري") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+            )
+            TextButton(onClick = { onOk(n, p, fmt); onDismiss() }) { Text("إنشاء") }
+            TextButton(onClick = onDismiss) { Text("إلغاء") }
         }
     }
 }
@@ -546,24 +593,30 @@ private fun BatchDialog(count: Int, onDismiss: () -> Unit, onOk: (String, Int, B
     var pat by remember { mutableStateOf("ملف_###") }
     var start by remember { mutableStateOf("1") }
     var keep by remember { mutableStateOf(true) }
-    AlertDialog(
-        onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp),
-        title = { Text("إعادة تسمية $count عنصر", style = MaterialTheme.typography.titleLarge) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TextField(pat, { pat = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                    label = { Text("النمط (كل # رقم)") }, modifier = Modifier.fillMaxWidth())
-                TextField(start, { start = it.filter { c -> c.isDigit() }.take(6) }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                    label = { Text("يبدأ من") }, modifier = Modifier.fillMaxWidth())
-                Row(Modifier.fillMaxWidth().clickable { keep = !keep }, verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.Checkbox(keep, { keep = it })
-                    Text("سيب الامتداد زي ما هو")
-                }
+    val cs = MaterialTheme.colorScheme
+    BottomBar(onDismiss) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = BarMinHeight)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("تسمية $count", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+            TextField(pat, { pat = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                label = { Text("النمط (كل # رقم)") }, modifier = Modifier.width(170.dp))
+            TextField(start, { start = it.filter { c -> c.isDigit() }.take(6) }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                label = { Text("يبدأ من") }, modifier = Modifier.width(100.dp))
+            Row(Modifier.clickable { keep = !keep }, verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(keep, { keep = it })
+                Text("سيب الامتداد", color = cs.onPrimaryContainer)
             }
-        },
-        confirmButton = { TextButton({ onOk(pat, start.toIntOrNull() ?: 1, keep); onDismiss() }) { Text("تغيير") } },
-        dismissButton = { TextButton(onDismiss) { Text("إلغاء") } }
-    )
+            TextButton({ onOk(pat, start.toIntOrNull() ?: 1, keep); onDismiss() }) { Text("تغيير") }
+            TextButton(onDismiss) { Text("إلغاء") }
+        }
+    }
 }
 
 @Composable
@@ -584,23 +637,23 @@ fun Dialogs(d: DlgState) {
     }
     d.batch?.let { files -> BatchDialog(files.size, { d.batch = null }) { pat, start, keep -> Ctl.batchRename(files, pat, start, keep) } }
     d.del?.let { files ->
-        AlertDialog(
-            onDismissRequest = { d.del = null },
-            shape = RoundedCornerShape(28.dp),
-            title = { Text("تحذف ${files.size} عنصر؟", style = MaterialTheme.typography.titleLarge) },
-            text = {
-                Text(
-                    if (Prefs.useTrash) "هتتنقل لسلة المحذوفات وتقدر ترجعها." else "هتتحذف نهائيًا ومش هتقدر ترجعها.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton({ Ctl.delete(files); d.del = null }) {
-                    Text("حذف", color = MaterialTheme.colorScheme.error)
+        val cs = MaterialTheme.colorScheme
+        BottomBar({ d.del = null }, color = cs.errorContainer) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = BarMinHeight).padding(start = 18.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("تحذف ${files.size} عنصر؟", style = MaterialTheme.typography.titleSmall, color = cs.onErrorContainer, maxLines = 1)
+                    Text(
+                        if (Prefs.useTrash) "هتتنقل لسلة المحذوفات وتقدر ترجعها." else "هتتحذف نهائيًا ومش هتقدر ترجعها.",
+                        style = MaterialTheme.typography.labelSmall, color = cs.onErrorContainer, maxLines = 2
+                    )
                 }
-            },
-            dismissButton = { TextButton({ d.del = null }) { Text("إلغاء") } }
-        )
+                TextButton({ Ctl.delete(files); d.del = null }) { Text("حذف", color = cs.error) }
+                TextButton({ d.del = null }) { Text("إلغاء", color = cs.onErrorContainer) }
+            }
+        }
     }
     d.info?.let { f ->
         val size by produceState(-1L, f.path) { value = withContext(Dispatchers.IO) { FS.sizeOf(f) } }

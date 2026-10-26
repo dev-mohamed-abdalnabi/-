@@ -62,6 +62,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -425,13 +426,13 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                 }
             }
             if (selecting || Ctl.clip.isNotEmpty()) {
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottom - 28.dp)) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = (bottom - 28.dp).coerceAtLeast(0.dp))) {
                     if (Ctl.clip.isNotEmpty()) Surface(
                         Modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth(),
                         shape = RoundedCornerShape(28.dp), color = cs.tertiaryContainer, shadowElevation = 6.dp
                     ) {
                         Row(
-                            Modifier.padding(start = 18.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                            Modifier.fillMaxWidth().heightIn(min = BarMinHeight).padding(start = 18.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
