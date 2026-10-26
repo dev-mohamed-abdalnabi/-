@@ -681,6 +681,71 @@ private fun ExtPicker(ext: String, onExt: (String) -> Unit, options: List<String
 }
 
 @Composable
+private fun BatchDialog(files: List<File>, onDismiss: () -> Unit, onOk: (String, Int, String?) -> Unit) {
+    var pat by remember { mutableStateOf("ملف_###") }
+    var start by remember { mutableStateOf("1") }
+    var ext by remember { mutableStateOf("") }
+    val opts = remember(files) { existingExts(files) }
+    val cs = MaterialTheme.colorScheme
+    BottomBar(onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("إعادة تسمية ${files.size} عنصر", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextField(pat, { pat = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                    label = { Text("النمط (كل # رقم)") }, modifier = Modifier.weight(1f))
+                TextField(start, { start = it.filter { c -> c.isDigit() }.take(6) }, singleLine = true,
+                    shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                    label = { Text("يبدأ من") }, modifier = Modifier.width(100.dp))
+            }
+            ExtPicker(ext, { ext = it }, opts, "سيبه فاضي علشان كل ملف يفضل بامتداده")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    { onOk(pat, start.toIntOrNull() ?: 1, cleanExt(ext).ifEmpty { null }); onDismiss() },
+                    Modifier.weight(1f)
+                ) { Text("تطبيق") }
+                TextButton(onDismiss) { Text("إلغاء") }
+            }
+        }
+    }
+}
+
+/** إعادة تسمية ملف واحد: الاسم لوحده + الامتداد لوحده (كتابة أو اختيار). */
+@Composable
+private fun RenameDialog(f: File, onDismiss: () -> Unit, onOk: (String) -> Unit) {
+    val isFile = !f.isDirectory
+    var name by remember { mutableStateOf(if (isFile) f.nameWithoutExtension else f.name) }
+    var ext by remember { mutableStateOf(if (isFile) f.extension else "") }
+    val opts = remember(f) { if (isFile) existingExts(listOf(f)) else emptyList() }
+    val cs = MaterialTheme.colorScheme
+    val fr = rememberAutoFocus()
+    BottomBar(onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("إعادة تسمية", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
+            TextField(
+                name, { name = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
+                label = { Text("الاسم") }, modifier = Modifier.fillMaxWidth().focusRequester(fr)
+            )
+            if (isFile) ExtPicker(ext, { ext = it }, opts, "سيبه فاضي علشان الملف يبقى من غير امتداد")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button({
+                    val e = cleanExt(ext)
+                    onOk(if (isFile && e.isNotEmpty()) "${name.trim()}.$e" else name.trim()); onDismiss()
+                }, Modifier.weight(1f)) { Text("تطبيق") }
+                TextButton(onDismiss) { Text("إلغاء") }
+            }
+        }
+    }
+}
+
+@Composable
 fun Dialogs(d: DlgState) {
     ArchiveDialogs()
     d.rename?.let { f ->
