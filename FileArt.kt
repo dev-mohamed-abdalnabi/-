@@ -5,6 +5,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.absoluteOffset
@@ -299,10 +300,10 @@ private fun folderFront() = Path().apply {
 }
 
 @Composable
-fun FolderArt(modifier: Modifier = Modifier, badge: ImageVector? = null, peek: FS.FolderPeek? = null) {
+fun FolderArt(modifier: Modifier = Modifier, badge: ImageVector? = null, peek: FS.FolderPeek? = null, tint: Color? = null) {
     val cs = MaterialTheme.colorScheme
-    val back = cs.primary
-    val front = lerp(cs.primary, Color.White, 0.55f).copy(alpha = 0.94f)
+    val back = tint ?: cs.primary
+    val front = lerp(back, Color.White, if (tint != null) 0.35f else 0.55f).copy(alpha = if (tint != null) 1f else 0.94f)
     val n = peek?.names?.size?.coerceAtMost(3) ?: 0
     BoxWithConstraints(modifier) {
         val w = maxWidth
@@ -345,8 +346,12 @@ private fun PeekCard(file: File?, name: String, kind: Kind, cw: Dp, ch: Dp, modi
             modifier.size(cw, ch).shadow(2.dp, shape).clip(shape),
             contentScale = ContentScale.Crop
         )
-        kind == Kind.FOLDER -> Box(modifier.size(cw, ch), contentAlignment = Alignment.Center) {
-            FolderArt(Modifier.requiredSize(ch * 0.95f))
+        kind == Kind.FOLDER -> Box(
+            modifier.size(cw, ch).shadow(2.dp, shape).clip(shape).background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            // مجلد جوه مجلد: كارت أبيض + فولدر بلون دافي (أصفر) عشان يبان إنه فولدر ومايدوبش في لون الأب
+            FolderArt(Modifier.size(cw * 0.92f), tint = Color(0xFFF2A93B))
         }
         else -> Box(modifier.size(cw, ch), contentAlignment = Alignment.Center) {
             FileTypeArt(ext, kind, Modifier.requiredSize(ch * 1.1f), tag = false)
