@@ -152,7 +152,7 @@ object Ctl {
                 val list = if (imgs.contains(f.path)) imgs else listOf(f.path)
                 push(Overlay.Images(list, list.indexOf(f.path).coerceAtLeast(0)))
             }
-            Kind.ARCHIVE -> if (Arc.supported(f)) push(Overlay.Zip(f.path)) else FS.openFile(app, f)
+            Kind.ARCHIVE -> if (Arc.supported(f)) arcAsk = f else FS.openFile(app, f)
             Kind.TEXT -> if (f.length() <= 1_000_000L) push(Overlay.Editor(f.path)) else FS.openFile(app, f)
             Kind.VIDEO, Kind.AUDIO -> push(Overlay.Media(f.path))
             Kind.DOC -> if (f.extension.equals("pdf", true)) push(Overlay.Pdf(f.path)) else FS.openFile(app, f)
@@ -204,7 +204,7 @@ object Ctl {
             }
             touched
         }) { touched ->
-            if (cut) clip.clear()
+            clip.clear()
             FS.scan(app, touched)
             toast(if (cut) "تم نقل ${items.size} عنصر" else "تم نسخ ${items.size} عنصر")
         }
@@ -341,6 +341,57 @@ object Ctl {
         }) { p ->
             FS.scan(app, listOf(p))
             toast("تم فك الضغط في ${File(p).name}")
+        }
+    }
+
+    /** الأرشيف اللي المستخدم داس عليه - بيظهر له اختيارات (فتح / فك هنا / فك في مكان تاني / باسورد) */
+    var arcAsk by mutableStateOf<File?>(null)
+
+    /** فك أرشيف كامل جوه فولدر [parent] (جديد باسم الأرشيف). لو محمي بباسورد بينادي onNeedPwd */
+    fun extractTo(f: File, parent: File, pwd: String?, onNeedPwd: (Boolean) -> Unit) {
+        task("جاري فك الضغط…", {
+            val dest = FS.unique(parent, f.name.substringBefore('.').ifEmpty { f.nameWithoutExtension }, true)
+            try {
+                Arc.extract(f, null, dest, pwd)
+            } catch (e: Exception) {
+                dest.deleteRecursively()
+                throw e
+            }
+            dest.path
+        }, fail = { e ->
+            if (e is Arc.NeedPassword) { onNeedPwd(e.wrong); true } else false
+        }) { p ->
+            FS.scan(app, listOf(p))
+            toast("تم فك الضغط في ${File(p).name}")
+        }
+    }
+
+    /** عمل نسخة ZIP جديدة من الأرشيف بباسورد AES-256 (الأصلي بيفضل زي ما هو) */
+    fun protectArchive(f: File, pwd: String) {
+        task("جاري حماية الأرشيف…", {
+            val tmp = File(app.cacheDir, "repack/" + System.nanoTime())
+            try {
+                tmp.mkdirs()
+                Arc.extract(f, null, tmp, null)
+                val items = tmp.listFiles()?.toList().orEmpty()
+                val parent = Incoming.destParent(app, f) ?: f.parentFile ?: tmp
+                val out = FS.unique(parent, f.nameWithoutExtension.removeSuffix(".tar") + "_protected.zip", false)
+                Prog.begin(items.sumOf { FS.sizeOf(it) })
+                try {
+                    Arc.createZip(items, out, pwd)
+                } catch (e: Exception) {
+                    out.delete()
+                    throw e
+                }
+                out.path
+            } finally {
+                tmp.deleteRecursively()
+            }
+        }, fail = { e ->
+            if (e is Arc.NeedPassword) { toast("الأرشيف ده محمي بباسورد بالفعل"); true } else false
+        }) { p ->
+            FS.scan(app, listOf(p))
+            toast("تم إنشاء ${File(p).name} بباسورد")
         }
     }
 

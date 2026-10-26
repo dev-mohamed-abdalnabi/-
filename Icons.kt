@@ -189,6 +189,12 @@ object Ic {
     }
     val Search by lazy { vec("search", w = 2.2f) { circle(10.5f, 10.5f, 6.3f); moveTo(15.2f, 15.2f); lineTo(20f, 20f) } }
     val Close by lazy { vec("close", w = 2.2f) { moveTo(6f, 6f); lineTo(18f, 18f); moveTo(18f, 6f); lineTo(6f, 18f) } }
+    val SelectAll by lazy {
+        vec("selectall", w = 2f) {
+            rr(4f, 4f, 16f, 16f, 4.5f)
+            moveTo(8.2f, 12.3f); lineTo(10.9f, 15f); lineTo(16f, 9.2f)
+        }
+    }
     val Check by lazy { vec("check", w = 2.4f) { moveTo(5f, 12.5f); lineTo(9.8f, 17.2f); lineTo(19f, 7.2f) } }
     val Menu by lazy {
         vec("menu", w = 2.2f) {

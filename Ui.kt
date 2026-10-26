@@ -424,18 +424,19 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
     val cs = MaterialTheme.colorScheme
     var more by remember { mutableStateOf(false) }
     Surface(
-        modifier.padding(horizontal = 12.dp).padding(top = 8.dp).fillMaxWidth(),
+        modifier.padding(horizontal = 12.dp).padding(vertical = 4.dp).fillMaxWidth(),
         shape = RoundedCornerShape(28.dp), color = cs.secondaryContainer, shadowElevation = 6.dp
     ) {
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "$count محدد", Modifier.weight(1f).clickable { onClose() }.padding(start = 10.dp),
-                style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer
-            )
-            TextButton(onAll) { Text("الكل") }
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             @Composable
             fun ib(ic: ImageVector, t: String, c: Color = cs.onSecondaryContainer, a: () -> Unit) =
-                IconButton(a, Modifier.size(40.dp)) { Icon(ic, t, Modifier.size(22.dp), tint = c) }
+                IconButton(a, Modifier.size(36.dp)) { Icon(ic, t, Modifier.size(21.dp), tint = c) }
+            ib(Ic.Close, "إلغاء التحديد", a = onClose)
+            Text(
+                "$count", Modifier.weight(1f).padding(horizontal = 6.dp),
+                style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer, maxLines = 1
+            )
+            ib(Ic.SelectAll, "تحديد الكل", a = onAll)
             ib(Ic.Copy, "نسخ", a = onCopy)
             ib(Ic.Cut, "قص", a = onCut)
             ib(Ic.Share, "مشاركة", a = onShare)
@@ -452,7 +453,6 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
                     mi("إعادة تسمية جماعية", Ic.Edit, onRename)
                     mi("إضافة للمفضلة", Ic.StarFill, onFav)
                     mi("فتح المجلد في تاب جديد", Ic.Folder, onTab)
-                    mi("إلغاء التحديد", Ic.Close, onClose)
                 }
             }
         }
@@ -529,6 +529,7 @@ private fun BatchDialog(count: Int, onDismiss: () -> Unit, onOk: (String, Int, B
 
 @Composable
 fun Dialogs(d: DlgState) {
+    ArchiveDialogs()
     d.rename?.let { f ->
         NameDialog("إعادة تسمية", f.name, "تغيير", { d.rename = null }) { Ctl.rename(f, it) }
     }

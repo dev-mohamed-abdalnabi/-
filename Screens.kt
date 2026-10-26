@@ -310,7 +310,8 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
                 GridCells.Fixed(if (Prefs.grid) listOf(4, 4, 2)[Prefs.viewSize.coerceIn(0, 2)] else 1), Modifier.fillMaxSize().imePadding(),
-                contentPadding = PaddingValues(start = if (denseGrid) 8.dp else 14.dp, end = if (denseGrid) 8.dp else 14.dp, bottom = bottom),
+                contentPadding = PaddingValues(start = if (denseGrid) 8.dp else 14.dp, end = if (denseGrid) 8.dp else 14.dp,
+                    bottom = bottom + (if (selecting) 64.dp else 0.dp) + (if (Ctl.clip.isNotEmpty()) 64.dp else 0.dp)),
                 horizontalArrangement = Arrangement.spacedBy(if (denseGrid) 2.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(if (Prefs.grid) 2.dp else 4.dp)
             ) {
                 val full: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
@@ -333,8 +334,6 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                                     )
                                     Crumbs(dir, primary, vols)
                                 }
-                                CircBtn(Ic.Search, "بحث") { searching = true }
-                                Spacer(Modifier.size(8.dp))
                                 Box {
                                     CookieIcon(Ic.Menu, 44.dp, cs.primary, cs.onPrimary, onClick = { addMenu = true })
                                     DropdownMenu(sortMenu, { sortMenu = false }) {
@@ -363,6 +362,10 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                                         )
                                     }
                                     DropdownMenu(addMenu, { addMenu = false }) {
+                                        DropdownMenuItem(
+                                            { Text("بحث") }, { addMenu = false; searching = true },
+                                            leadingIcon = { Icon(Ic.Search, null, Modifier.size(20.dp)) }
+                                        )
                                         DropdownMenuItem(
                                             { Text("مجلد جديد") }, { addMenu = false; d.mkdir = dir },
                                             leadingIcon = { Icon(Ic.NewFolder, null, Modifier.size(20.dp)) }
@@ -399,20 +402,6 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                         }
                     }
                 }
-                if (Ctl.clip.isNotEmpty()) item(span = full) {
-                    Row(
-                        Modifier.padding(horizontal = 6.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp))
-                            .background(cs.tertiaryContainer).padding(start = 18.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "${Ctl.clip.size} عنصر ${if (Ctl.clipCut) "للنقل" else "للنسخ"}",
-                            Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = cs.onTertiaryContainer
-                        )
-                        TextButton({ Ctl.paste(dir) }) { Icon(Ic.Paste, null, Modifier.size(20.dp)); Spacer(Modifier.size(6.dp)); Text("لصق هنا") }
-                        IconButton({ Ctl.clearClip() }) { Icon(Ic.Close, "إلغاء", tint = cs.onTertiaryContainer) }
-                    }
-                }
                 if (!loading && shown.isEmpty()) item(span = full) {
                     if (q.trim().length >= 2) EmptyState(Ic.Search, "مفيش نتائج", "جرّب كلمة تانية.")
                     else if (android.os.Build.VERSION.SDK_INT >= 30 && (dir.path.endsWith("/Android/data") || dir.path.endsWith("/Android/obb")))
@@ -435,8 +424,25 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                     }
                 }
             }
-            if (selecting) {
-                SelectionBar(
+            if (selecting || Ctl.clip.isNotEmpty()) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottom - 28.dp)) {
+                    if (Ctl.clip.isNotEmpty()) Surface(
+                        Modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth(),
+                        shape = RoundedCornerShape(28.dp), color = cs.tertiaryContainer, shadowElevation = 6.dp
+                    ) {
+                        Row(
+                            Modifier.padding(start = 18.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${Ctl.clip.size} عنصر ${if (Ctl.clipCut) "للنقل" else "للنسخ"}",
+                                Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = cs.onTertiaryContainer
+                            )
+                            TextButton({ Ctl.paste(dir) }) { Icon(Ic.Paste, null, Modifier.size(20.dp)); Spacer(Modifier.size(6.dp)); Text("لصق هنا") }
+                            IconButton({ Ctl.clearClip() }) { Icon(Ic.Close, "إلغاء", tint = cs.onTertiaryContainer) }
+                        }
+                    }
+                    if (selecting) SelectionBar(
                     sel.size, onAll = { sel.clear(); sel.addAll(shown.map { it.file.path }) },
                     onCopy = { Ctl.setClip(selFiles(), false); sel.clear() },
                     onCut = { Ctl.setClip(selFiles(), true); sel.clear() },
@@ -455,8 +461,9 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                         Prefs.save(); sel.clear(); Ctl.toast("اتضافت للمفضلة")
                     },
                     onTab = { selFiles().firstOrNull { it.isDirectory }?.let { Ctl.newTab(it) }; sel.clear() },
-                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                    modifier = Modifier
                 )
+                }
             }
         }
     }

@@ -4,6 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -62,26 +67,31 @@ fun Crumbs(dir: File, primary: File, vols: List<Vol>) {
 fun TabStrip() {
     if (Ctl.tabs.size <= 1) return
     val cs = MaterialTheme.colorScheme
+    val primaryPath = remember { android.os.Environment.getExternalStorageDirectory().path }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically
     ) {
         Ctl.tabs.forEachIndexed { i, f ->
             val on = i == Ctl.tabIdx
+            val label = if (f == null || f.path == primaryPath || f.name.isEmpty()) "التخزين" else f.name
             Row(
-                Modifier.clip(RoundedCornerShape(16.dp))
+                Modifier.height(40.dp).widthIn(min = 96.dp, max = 180.dp).clip(RoundedCornerShape(20.dp))
                     .background(if (on) cs.primaryContainer else cs.surfaceContainerHigh)
                     .clickable { Ctl.tabIdx = i }
-                    .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(start = 16.dp, end = if (on) 4.dp else 16.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
             ) {
                 Text(
-                    f?.name?.ifEmpty { "التخزين" } ?: "التخزين", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    label, Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelLarge,
                     color = if (on) cs.onPrimaryContainer else cs.onSurface
                 )
-                Icon(Ic.Close, "قفل التاب", Modifier.size(18.dp).clip(RoundedCornerShape(9.dp)).clickable { Ctl.closeTab(i) },
-                    tint = if (on) cs.onPrimaryContainer else cs.onSurfaceVariant)
+                // زرار القفل بيظهر على التاب الحالي بس، عشان الضغطة على أي تاب تانى ما تقفلوش بالغلط
+                if (on) Box(
+                    Modifier.padding(start = 4.dp).size(32.dp).clip(CircleShape).clickable { Ctl.closeTab(i) },
+                    contentAlignment = Alignment.Center
+                ) { Icon(Ic.Close, "قفل التاب", Modifier.size(18.dp), tint = cs.onPrimaryContainer) }
             }
         }
         Icon(Ic.Plus, "تاب جديد", Modifier.size(32.dp).clip(RoundedCornerShape(16.dp)).background(cs.surfaceContainerHigh).clickable { Ctl.newTab() }.padding(6.dp))
