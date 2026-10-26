@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -66,6 +68,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -482,24 +485,56 @@ private fun ZipDialog(initial: String, onDismiss: () -> Unit, onOk: (String, Str
     var fmt by remember { mutableStateOf(0) }
     var n by remember { mutableStateOf(initial) }
     var p by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp),
-        title = { Text("ضغط", style = MaterialTheme.typography.titleLarge) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val cs = MaterialTheme.colorScheme
+
+    // شريط ضغط سفلي بدل نافذة حوار وسط الشاشة، بنفس مقاس ومكان أشرطة اللصق والإجراءات.
+    Popup(
+        alignment = Alignment.BottomCenter,
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+    ) {
+        Surface(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 100.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = cs.primaryContainer,
+            shadowElevation = 6.dp
+        ) {
+            Row(
+                Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("ضغط", style = MaterialTheme.typography.titleSmall, color = cs.onPrimaryContainer)
                 Switcher(listOf("ZIP", "7z", "TAR.GZ"), fmt) { fmt = it }
-                TextField(n, { n = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth())
-                if (fmt == 0) TextField(
-                    p, { p = it }, singleLine = true, shape = RoundedCornerShape(20.dp), colors = fieldColors(),
-                    placeholder = { Text("باسورد (اختياري) - تشفير AES-256") },
-                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+                TextField(
+                    value = n,
+                    onValueChange = { n = it },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = fieldColors(),
+                    modifier = Modifier.width(150.dp),
+                    placeholder = { Text("اسم الملف") }
                 )
+                if (fmt == 0) TextField(
+                    value = p,
+                    onValueChange = { p = it },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = fieldColors(),
+                    modifier = Modifier.width(170.dp),
+                    placeholder = { Text("باسورد اختياري") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                )
+                TextButton(onClick = { onOk(n, p, fmt); onDismiss() }) { Text("إنشاء") }
+                TextButton(onClick = onDismiss) { Text("إلغاء") }
             }
-        },
-        confirmButton = { TextButton({ onOk(n, p, fmt); onDismiss() }) { Text("ضغط") } },
-        dismissButton = { TextButton(onDismiss) { Text("إلغاء") } }
-    )
+        }
+    }
 }
 
 @Composable

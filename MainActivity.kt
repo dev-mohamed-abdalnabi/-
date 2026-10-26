@@ -216,8 +216,19 @@ fun Shell() {
                     }
                 }
                 SnackbarHost(
-                    Ctl.snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
-                        .padding(start = 16.dp, end = 16.dp, bottom = if (imeOpen) 12.dp else if (overlay != null) 24.dp else 100.dp)
+                    Ctl.snack,
+                    Modifier.align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(
+                            start = 16.dp,
+                            end = 16.dp,
+                            // Keep feedback above the paste/action strips and bottom navigation.
+                            bottom = when {
+                                imeOpen -> 12.dp
+                                overlay != null -> 24.dp
+                                else -> 208.dp
+                            }
+                        )
                 )
                 Dialogs(d)
                 BusyOverlay()

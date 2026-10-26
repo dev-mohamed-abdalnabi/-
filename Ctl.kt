@@ -12,6 +12,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +26,8 @@ object Ctl {
     lateinit var app: Context
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val snack = SnackbarHostState()
+    private var snackbarJob: Job? = null
+    private var snackbarTimer: Job? = null
 
     var tab by mutableIntStateOf(0)
     val stack = mutableStateListOf<Overlay>()
@@ -112,18 +116,41 @@ object Ctl {
     var requestAccess: () -> Unit = {}
     var pickSaf: (String) -> Unit = {}
 
+    /** Feedback breve, con duración ajustada حسب أهمية العملية. */
+    private fun feedbackDuration(m: String): Long = when {
+        m.contains("تعذر") || m.contains("فشل") || m.contains("مشكلة") || m.contains("مش مظبوط") || m.contains("باسورد") -> 3200L
+        m.contains("حذف") || m.contains("اتحذف") || m.contains("اتنقل") -> 2600L
+        m.contains("اتنسخ") || m.contains("اتقص") || m.contains("لصق") || m.contains("نسخ") || m.contains("نقل") -> 1900L
+        m.contains("تم") || m.contains("اتحفظ") || m.contains("اتضاف") || m.contains("اتسترجع") -> 2100L
+        else -> 2400L
+    }
+
+    private fun replaceSnackbar() {
+        snackbarTimer?.cancel()
+        snackbarJob?.cancel()
+        snack.currentSnackbarData?.dismiss()
+    }
+
     fun toast(m: String) {
-        scope.launch {
+        replaceSnackbar()
+        snackbarJob = scope.launch {
+            snack.showSnackbar(m, duration = SnackbarDuration.Indefinite)
+        }
+        snackbarTimer = scope.launch {
+            delay(feedbackDuration(m))
             snack.currentSnackbarData?.dismiss()
-            snack.showSnackbar(m)
         }
     }
 
     fun toastUndo(m: String, label: String, onClick: () -> Unit) {
-        scope.launch {
-            snack.currentSnackbarData?.dismiss()
-            val r = snack.showSnackbar(m, actionLabel = label, duration = SnackbarDuration.Long)
+        replaceSnackbar()
+        snackbarJob = scope.launch {
+            val r = snack.showSnackbar(m, actionLabel = label, duration = SnackbarDuration.Indefinite)
             if (r == SnackbarResult.ActionPerformed) onClick()
+        }
+        snackbarTimer = scope.launch {
+            delay(6500L)
+            snack.currentSnackbarData?.dismiss()
         }
     }
 
