@@ -174,11 +174,21 @@ fun Shell() {
             PermissionScreen()
         } else {
             Box(Modifier.fillMaxSize()) {
-                Crossfade(Ctl.tab, Modifier.fillMaxSize(), label = "tab") { t ->
-                    when (t) {
-                        0 -> BrowserScreen(bottom, d)
-                        1 -> HomeScreen(bottom)
-                        else -> SettingsScreen(bottom)
+                // المتصفح بيفضل شغال طول الوقت (مخفي ورا الشاشات التانية) علشان الرجوع للملفات يبقى فوري
+                // من غير ما يعيد تحميل المجلد ولا يرجع الاسكرول لفوق.
+                BrowserScreen(bottom, d)
+                if (Ctl.tab != 0) {
+                    Box(
+                        Modifier.fillMaxSize().background(cs.surface).pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                            }
+                        }
+                    ) {
+                        when (Ctl.tab) {
+                            1 -> HomeScreen(bottom)
+                            else -> SettingsScreen(bottom)
+                        }
                     }
                 }
                 AnimatedVisibility(
@@ -191,7 +201,7 @@ fun Shell() {
                             .navigationBarsPadding().padding(top = 28.dp, bottom = 14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        FloatingNav(Ctl.tab) { Ctl.tab = it }
+                        FloatingNav(Ctl.tab, onFilesDouble = { Ctl.browseDir = null }) { Ctl.tab = it }
                     }
                 }
                 AnimatedVisibility(

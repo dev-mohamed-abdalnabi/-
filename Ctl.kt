@@ -35,6 +35,13 @@ object Ctl {
     var clipCut by mutableStateOf(false)
     var busy by mutableStateOf<String?>(null)
     var rev by mutableIntStateOf(0)
+    // كاش في الذاكرة: الشاشة بتظهر فورًا بآخر نتيجة، وبعدها بتتحدث في الخلفية
+    val dirCache = object : LinkedHashMap<String, List<FileItem>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<FileItem>>?): Boolean = size > 40
+    }
+    var volsCache: List<Vol> = emptyList()
+    var homeCounts: Map<CatKind, Int> = emptyMap()
+    var homeTrash: Int = 0
     // ---- تابات التصفح ----
     val tabs = mutableStateListOf<File?>(null)
     var tabIdx by mutableIntStateOf(0)

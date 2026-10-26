@@ -113,9 +113,10 @@ fun iconFor(k: Kind): ImageVector = when (k) {
 private class NavTab(val label: String, val icon: ImageVector)
 
 @Composable
-fun FloatingNav(sel: Int, on: (Int) -> Unit) {
+fun FloatingNav(sel: Int, onFilesDouble: () -> Unit = {}, on: (Int) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val hap = LocalHapticFeedback.current
+    val lastFilesTap = remember { longArrayOf(0L) }
     val items = remember {
         listOf(NavTab("الملفات", Ic.Folder), NavTab("المزيد", Ic.Apps), NavTab("الإعدادات", Ic.Settings))
     }
@@ -128,7 +129,16 @@ fun FloatingNav(sel: Int, on: (Int) -> Unit) {
                     Modifier.height(54.dp).clip(CircleShape).background(bg)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                             hap.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            on(i)
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (i == 0 && now - lastFilesTap[0] < 400L) {
+                                // ضغطتين سريعتين على "الملفات" = ارجع للرئيسية
+                                lastFilesTap[0] = 0L
+                                on(0)
+                                onFilesDouble()
+                            } else {
+                                lastFilesTap[0] = if (i == 0) now else 0L
+                                on(i)
+                            }
                         }
                         .padding(horizontal = 20.dp).animateContentSize(spring(0.8f, 400f)),
                     verticalAlignment = Alignment.CenterVertically

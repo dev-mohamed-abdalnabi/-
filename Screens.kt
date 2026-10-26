@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 
 package com.next.files
 
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -34,7 +35,11 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -111,15 +116,18 @@ private fun CircBtn(icon: ImageVector, desc: String, onClick: () -> Unit) {
 fun HomeScreen(bottom: Dp) {
     val cs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
-    var vols by remember { mutableStateOf(emptyList<Vol>()) }
-    var counts by remember { mutableStateOf(emptyMap<CatKind, Int>()) }
-    var trashN by remember { mutableStateOf(0) }
+    var vols by remember { mutableStateOf(Ctl.volsCache) }
+    var counts by remember { mutableStateOf(Ctl.homeCounts) }
+    var trashN by remember { mutableStateOf(Ctl.homeTrash) }
     LaunchedEffect(Ctl.rev, Prefs.showHidden) {
         withContext(Dispatchers.IO) {
             vols = FS.volumes(ctx)
+            Ctl.volsCache = vols
             counts = CatKind.values().filter { it != CatKind.RECENT && it != CatKind.LARGE }
                 .associateWith { FS.catCount(ctx, it, Prefs.showHidden) }
+            Ctl.homeCounts = counts
             trashN = TrashBin.list().size
+            Ctl.homeTrash = trashN
         }
     }
     Glow {
@@ -252,12 +260,15 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
     val primary = remember { Environment.getExternalStorageDirectory() }
     val dir = Ctl.browseDir ?: primary
     WatchDir(dir)
-    var vols by remember { mutableStateOf(listOf<Vol>()) }
-    LaunchedEffect(Unit) { vols = withContext(Dispatchers.IO) { FS.volumes(ctx) } }
+    var vols by remember { mutableStateOf(Ctl.volsCache) }
+    LaunchedEffect(Unit) { vols = withContext(Dispatchers.IO) { FS.volumes(ctx) }; Ctl.volsCache = vols }
     val atRoot = dir.path == primary.path || vols.any { it.dir.path == dir.path } || dir.parentFile == null
 
     var items by remember { mutableStateOf(emptyList<FileItem>()) }
     var loading by remember { mutableStateOf(true) }
+    var shownKey by remember { mutableStateOf("") }
+    var refreshing by remember { mutableStateOf(false) }
+    val pullState = rememberPullToRefreshState()
     var q by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<FileItem>?>(null) }
     val sel = remember { mutableStateListOf<String>() }
@@ -269,10 +280,17 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
 
     val sortSel = Prefs.sortFor(dir)
     LaunchedEffect(dir.path, Ctl.rev, Prefs.showHidden, sortSel) {
-        loading = true
-        items = withContext(Dispatchers.IO) { FS.sort(FS.list(dir, Prefs.showHidden), sortSel.first, sortSel.second) }
+        val key = dir.path + "|" + Prefs.showHidden + "|" + sortSel.first + "|" + sortSel.second
+        val cached = Ctl.dirCache[key]
+        // لو المجلد ده اتفتح قبل كده بنعرضه فورًا وبنحدّثه في الخلفية (من غير ما نستنى التحميل)
+        if (cached != null && shownKey != key) { items = cached; loading = false } else if (cached == null) loading = true
+        val fresh = withContext(Dispatchers.IO) { FS.sort(FS.list(dir, Prefs.showHidden), sortSel.first, sortSel.second) }
+        Ctl.dirCache[key] = fresh
+        items = fresh
+        shownKey = key
         loading = false
         sel.removeAll { p -> items.none { it.file.path == p } }
+        if (refreshing) { delay(350); refreshing = false }
     }
     LaunchedEffect(dir.path) { sel.clear(); q = ""; results = null; searching = false }
     LaunchedEffect(q, dir.path, Ctl.rev) {
@@ -288,7 +306,7 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
     val needSaf = remember(dir.path, Ctl.rev) { SafFs.subOf(dir)?.takeIf { Saf.treeOf(ctx, it) == null } }
     val selecting = sel.isNotEmpty()
     // لازم يتعطل لما فيه شاشة مفتوحة فوق (صورة/فيديو/...) وإلا هياخد زرار الرجوع بدالها
-    BackHandler(enabled = Ctl.stack.isEmpty() && (selecting || searching || q.isNotEmpty() || !atRoot)) {
+    BackHandler(enabled = Ctl.tab == 0 && Ctl.stack.isEmpty() && (selecting || searching || q.isNotEmpty() || !atRoot)) {
         when {
             selecting -> sel.clear()
             searching || q.isNotEmpty() -> { q = ""; searching = false }
@@ -309,7 +327,18 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
 
     val denseGrid = Prefs.grid && Prefs.viewSize == 1
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { refreshing = true; Ctl.bump() },
+            modifier = Modifier.fillMaxSize(),
+            state = pullState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullState, isRefreshing = refreshing,
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                )
+            }
+        ) {
             LazyVerticalGrid(
                 GridCells.Fixed(if (Prefs.grid) listOf(4, 4, 2)[Prefs.viewSize.coerceIn(0, 2)] else 1), Modifier.fillMaxSize().imePadding(),
                 contentPadding = PaddingValues(start = if (denseGrid) 8.dp else 14.dp, end = if (denseGrid) 8.dp else 14.dp,
@@ -490,29 +519,92 @@ fun CollectionScreen(kind: CatKind, d: DlgState) {
     val cs = MaterialTheme.colorScheme
     var files by remember { mutableStateOf(emptyList<FileItem>()) }
     var loading by remember { mutableStateOf(true) }
+    val sel = remember { mutableStateListOf<String>() }
     LaunchedEffect(kind, Ctl.rev, Prefs.showHidden) {
         loading = true
         files = withContext(Dispatchers.IO) { FS.catFiles(ctx, kind, Prefs.showHidden).map { FS.toItem(it) } }
         loading = false
+        sel.removeAll { p -> files.none { it.file.path == p } }
     }
     val allFiles = remember(files) { files.map { it.file } }
+    val selecting = sel.isNotEmpty()
+    BackHandler(enabled = selecting) { sel.clear() }
+    fun selFiles(): List<File> = sel.map { File(it) }
+    fun toggle(i: FileItem) {
+        val p = i.file.path
+        if (p in sel) sel.remove(p) else sel.add(p)
+    }
+    val denseGrid = Prefs.grid && Prefs.viewSize == 1
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            ScreenHeader(kind.title, "Next · ${files.size} عنصر", onBack = { Ctl.pop() })
+            ScreenHeader(
+                kind.title,
+                if (selecting) "${sel.size} محدد" else "Next · ${files.size} عنصر",
+                onBack = { if (selecting) sel.clear() else Ctl.pop() },
+                actions = {
+                    IconButton({ Prefs.grid = !Prefs.grid; Prefs.save() }) {
+                        Icon(Ic.Grid, if (Prefs.grid) "عرض قائمة" else "عرض شبكة")
+                    }
+                }
+            )
             if (!loading && files.isEmpty()) {
                 EmptyState(iconForCat(kind), "مفيش ${kind.title}", "مفيش ملفات من النوع ده.")
             }
-            LazyColumn(
+            LazyVerticalGrid(
+                GridCells.Fixed(if (Prefs.grid) listOf(4, 4, 2)[Prefs.viewSize.coerceIn(0, 2)] else 1),
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 40.dp)
+                contentPadding = PaddingValues(
+                    start = if (denseGrid) 8.dp else 14.dp, end = if (denseGrid) 8.dp else 14.dp,
+                    bottom = if (selecting) 110.dp else 40.dp
+                ),
+                horizontalArrangement = Arrangement.spacedBy(if (denseGrid) 2.dp else 6.dp),
+                verticalArrangement = Arrangement.spacedBy(if (Prefs.grid) 2.dp else 4.dp)
             ) {
-                items(files, key = { it.file.path }) { i ->
-                    FileRow(i, false, subtitle = FS.fmtSize(i.size) + " · " + FS.fmtDate(i.modified), onClick = {
-                        Ctl.open(i.file, allFiles)
-                    }, onLong = {}) {
-                        MoreButton(i, d, showInFolder = true, siblings = allFiles)
+                val click: (FileItem) -> Unit = { i -> if (selecting) toggle(i) else Ctl.open(i.file, allFiles) }
+                if (Prefs.grid) {
+                    items(files, key = { it.file.path }) { i ->
+                        FileCard(i, i.file.path in sel, { click(i) }, { if (!selecting) toggle(i) }, dense = denseGrid)
+                    }
+                } else {
+                    items(files, key = { it.file.path }, span = { GridItemSpan(maxLineSpan) }) { i ->
+                        FileRow(
+                            i, i.file.path in sel,
+                            subtitle = FS.fmtSize(i.size) + " · " + FS.fmtDate(i.modified),
+                            onClick = { click(i) }, onLong = { if (!selecting) toggle(i) }
+                        ) {
+                            if (!selecting) MoreButton(i, d, showInFolder = true, siblings = allFiles)
+                        }
                     }
                 }
+            }
+        }
+        if (selecting) {
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
+                SelectionBar(
+                    sel.size, onAll = { sel.clear(); sel.addAll(files.map { it.file.path }) },
+                    onCopy = { Ctl.setClip(selFiles(), false); sel.clear() },
+                    onCut = { Ctl.setClip(selFiles(), true); sel.clear() },
+                    onShare = { Ctl.shareFiles(selFiles()) },
+                    onZip = { d.zip = selFiles(); sel.clear() },
+                    onDelete = { Ctl.askDelete(selFiles(), d); sel.clear() },
+                    onClose = { sel.clear() },
+                    onRename = { d.batch = selFiles(); sel.clear() },
+                    onInvert = {
+                        val cur = sel.toSet()
+                        val inv = files.map { it.file.path }.filter { it !in cur }
+                        sel.clear(); sel.addAll(inv)
+                    },
+                    onFav = {
+                        selFiles().forEach { if (it.path !in Prefs.favorites) Prefs.favorites.add(it.path) }
+                        Prefs.save(); sel.clear(); Ctl.toast("اتضافت للمفضلة")
+                    },
+                    // فتح مكان أول عنصر متحدد في تاب جديد
+                    onTab = { selFiles().firstOrNull()?.parentFile?.let { Ctl.newTab(it) }; sel.clear() },
+                    canRenameOne = sel.size == 1,
+                    onRenameOne = { selFiles().singleOrNull()?.let { d.rename = it }; sel.clear() },
+                    canOpenWith = sel.size == 1 && selFiles().singleOrNull()?.isDirectory == false,
+                    onOpenWith = { selFiles().singleOrNull()?.takeIf { !it.isDirectory }?.let { Ctl.openWith(it) }; sel.clear() }
+                )
             }
         }
     }
