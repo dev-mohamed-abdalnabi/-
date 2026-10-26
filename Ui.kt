@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -430,13 +431,16 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
         modifier.padding(horizontal = 12.dp).padding(vertical = 4.dp).fillMaxWidth(),
         shape = RoundedCornerShape(28.dp), color = cs.secondaryContainer, shadowElevation = 6.dp
     ) {
-        Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             @Composable
             fun ib(ic: ImageVector, t: String, c: Color = cs.onSecondaryContainer, a: () -> Unit) =
                 IconButton(a, Modifier.size(36.dp)) { Icon(ic, t, Modifier.size(21.dp), tint = c) }
             ib(Ic.Close, "إلغاء التحديد", a = onClose)
             Text(
-                "$count", Modifier.weight(1f).padding(horizontal = 6.dp),
+                "$count", Modifier.padding(horizontal = 6.dp).widthIn(min = 18.dp),
                 style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer, maxLines = 1
             )
             ib(Ic.SelectAll, "تحديد الكل", a = onAll)
@@ -497,7 +501,7 @@ private fun ZipDialog(initial: String, onDismiss: () -> Unit, onOk: (String, Str
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp)
-                .padding(bottom = 100.dp),
+                .padding(bottom = 72.dp),
             shape = RoundedCornerShape(28.dp),
             color = cs.primaryContainer,
             shadowElevation = 6.dp
