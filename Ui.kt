@@ -413,8 +413,8 @@ fun ItemMenu(open: Boolean, dismiss: () -> Unit, item: FileItem, d: DlgState, sh
         }
         if (!item.isDir) {
             mi("فتح", Ic.Eye) { Ctl.open(f, siblings) }
-            mi("فتح بواسطة", Ic.File) { FS.openFile(ctx, f, true) }
-            mi("مشاركة", Ic.Share) { FS.share(ctx, listOf(f)) }
+            mi("فتح بواسطة", Ic.File) { Ctl.openWith(f) }
+            mi("مشاركة", Ic.Share) { Ctl.shareFiles(listOf(f)) }
         }
         if (showInFolder) mi("عرض في المجلد", Ic.Folder) { f.parentFile?.let { Ctl.openDir(it) } }
         mi("نسخ", Ic.Copy) { Ctl.setClip(listOf(f), false) }
@@ -422,7 +422,7 @@ fun ItemMenu(open: Boolean, dismiss: () -> Unit, item: FileItem, d: DlgState, sh
         mi("إعادة تسمية", Ic.Edit) { d.rename = f }
         mi("ضغط", Ic.Archive) { d.zip = listOf(f) }
         if (item.isDir) mi("فتح في تاب جديد", Ic.Plus) { Ctl.newTab(f) }
-        if (!item.isDir && Arc.supported(f)) {
+        if (!item.isDir && Arc.supported(f) && !SafFs.usesSaf(f)) {
             mi("استعراض المحتوى", Ic.Eye) { Ctl.push(Overlay.Zip(f.path)) }
             mi("فك الضغط هنا", Ic.Download) { Ctl.unzip(f) }
         }
@@ -646,7 +646,7 @@ fun Dialogs(d: DlgState) {
                 Column(Modifier.weight(1f)) {
                     Text("تحذف ${files.size} عنصر؟", style = MaterialTheme.typography.titleSmall, color = cs.onErrorContainer, maxLines = 1)
                     Text(
-                        if (Prefs.useTrash) "هتتنقل لسلة المحذوفات وتقدر ترجعها." else "هتتحذف نهائيًا ومش هتقدر ترجعها.",
+                        if (Prefs.useTrash && files.none { SafFs.usesSaf(it) }) "هتتنقل لسلة المحذوفات وتقدر ترجعها." else "هتتحذف نهائيًا ومش هتقدر ترجعها.",
                         style = MaterialTheme.typography.labelSmall, color = cs.onErrorContainer, maxLines = 2
                     )
                 }

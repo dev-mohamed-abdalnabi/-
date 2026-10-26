@@ -222,9 +222,8 @@ fun HomeScreen(bottom: Dp) {
 }
 
 private fun openAndroidDir(sub: String) {
-    val f = File(Environment.getExternalStorageDirectory(), "Android/$sub")
-    if (android.os.Build.VERSION.SDK_INT <= 29 || (f.list()?.isNotEmpty() == true)) Ctl.openDir(f)
-    else Ctl.push(Overlay.AndroidDir(sub))
+    // المتصفح نفسه بيتعامل مع Android/data و Android/obb (عن طريق SAF لو لازم)
+    Ctl.openDir(File(Environment.getExternalStorageDirectory(), "Android/$sub"))
 }
 
 @Composable
@@ -286,6 +285,7 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
     }
 
     val shown = results ?: items
+    val needSaf = remember(dir.path, Ctl.rev) { SafFs.subOf(dir)?.takeIf { Saf.treeOf(ctx, it) == null } }
     val selecting = sel.isNotEmpty()
     BackHandler(enabled = selecting || searching || q.isNotEmpty() || !atRoot) {
         when {
@@ -405,8 +405,16 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                 }
                 if (!loading && shown.isEmpty()) item(span = full) {
                     if (q.trim().length >= 2) EmptyState(Ic.Search, "مفيش نتائج", "جرّب كلمة تانية.")
-                    else if (android.os.Build.VERSION.SDK_INT >= 30 && (dir.path.endsWith("/Android/data") || dir.path.endsWith("/Android/obb")))
-                        EmptyState(Ic.Lock, "النظام بيمنع الوصول هنا", "افتح المزيد ← Android/${dir.name} وامنح الصلاحية.")
+                    else if (needSaf != null)
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            EmptyState(
+                                Ic.Lock, "محتاج صلاحية المجلد ده",
+                                if (android.os.Build.VERSION.SDK_INT >= 33)
+                                    "أندرويد 13 وأحدث بيمنع الوصول للمجلد ده بالطريقة العادية. جرّب المنح، ولو النظام رفض يبقى محتاج Shizuku أو root."
+                                else "دوس منح الوصول، وبعدين \"استخدام هذا المجلد\" وإنت في Android/$needSaf."
+                            )
+                            androidx.compose.material3.Button({ Ctl.pickSaf(needSaf) }) { Text("منح الوصول") }
+                        }
                     else EmptyState(Ic.Folder, "المجلد فاضي", "مفيش ملفات هنا لسه.")
                 }
                 if (Prefs.grid) {
@@ -447,7 +455,7 @@ fun BrowserScreen(bottom: Dp, d: DlgState) {
                     sel.size, onAll = { sel.clear(); sel.addAll(shown.map { it.file.path }) },
                     onCopy = { Ctl.setClip(selFiles(), false); sel.clear() },
                     onCut = { Ctl.setClip(selFiles(), true); sel.clear() },
-                    onShare = { FS.share(ctx, selFiles()) },
+                    onShare = { Ctl.shareFiles(selFiles()) },
                     onZip = { d.zip = selFiles(); sel.clear() },
                     onDelete = { Ctl.askDelete(selFiles(), d); sel.clear() },
                     onClose = { sel.clear() },

@@ -76,6 +76,7 @@ object FS {
     }
 
     fun list(dir: File, hidden: Boolean): List<FileItem> {
+        if (SafFs.usesSaf(dir)) return SafFs.list(dir, hidden)
         val arr = dir.listFiles() ?: return emptyList()
         return arr.filter { hidden || !it.name.startsWith(".") }.map { toItem(it) }
     }
@@ -105,9 +106,20 @@ object FS {
         val queue = ArrayDeque<File>()
         queue.add(dir)
         val needle = q.lowercase()
+        val safRoot = SafFs.usesSaf(dir)
         while (queue.isNotEmpty() && out.size < limit) {
             currentCoroutineContext().ensureActive()
             val d = queue.removeFirst()
+            if (safRoot) {
+                for (k in SafFs.list(d, hidden)) {
+                    if (k.name.lowercase().contains(needle)) {
+                        out.add(k)
+                        if (out.size >= limit) break
+                    }
+                    if (k.isDir) queue.add(k.file)
+                }
+                continue
+            }
             val kids = d.listFiles() ?: continue
             for (k in kids) {
                 if (!hidden && k.name.startsWith(".")) continue
@@ -121,8 +133,10 @@ object FS {
         return out
     }
 
-    fun sizeOf(f: File): Long =
-        if (f.isFile) f.length() else f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    fun sizeOf(f: File): Long {
+        if (SafFs.usesSaf(f)) return SafFs.sizeOf(f)
+        return if (f.isFile) f.length() else f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
 
     // ---------- storage volumes ----------
     fun volumes(ctx: Context): List<Vol> {
@@ -271,9 +285,11 @@ object FS {
 
     private val peekCache = LruCache<String, FolderPeek>(800)
 
-    fun peekCached(f: File): FolderPeek? = peekCache.get(f.path + "|" + f.lastModified())
+    fun peekCached(f: File): FolderPeek? =
+        if (SafFs.usesSaf(f)) null else peekCache.get(f.path + "|" + f.lastModified())
 
     fun peek(dir: File, hidden: Boolean): FolderPeek {
+        if (SafFs.usesSaf(dir)) return SafFs.peek(dir, hidden)
         val key = dir.path + "|" + dir.lastModified()
         peekCache.get(key)?.let { return it }
         val all = (dir.list() ?: emptyArray()).filter { hidden || !it.startsWith(".") }

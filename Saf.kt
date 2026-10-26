@@ -90,7 +90,23 @@ object Saf {
     }
 
     fun rootId(tree: Uri): String = DocumentsContract.getTreeDocumentId(tree)
-    private fun uri(tree: Uri, id: String): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+    fun uri(tree: Uri, id: String): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+
+    fun stat(ctx: Context, tree: Uri, id: String): Doc? {
+        val cols = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        )
+        return try {
+            ctx.contentResolver.query(uri(tree, id), cols, null, null, null)?.use { c ->
+                if (c.moveToFirst()) Doc(
+                    c.getString(0), c.getString(1) ?: "?", c.getString(2) ?: "",
+                    if (c.isNull(3)) 0L else c.getLong(3), if (c.isNull(4)) 0L else c.getLong(4)
+                ) else null
+            }
+        } catch (e: Exception) { null }
+    }
 
     fun list(ctx: Context, tree: Uri, parentId: String): List<Doc> {
         val out = ArrayList<Doc>()

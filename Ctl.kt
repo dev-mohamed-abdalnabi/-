@@ -173,6 +173,10 @@ object Ctl {
     }
 
     fun open(f: File, siblings: List<File> = emptyList()) {
+        if (SafFs.usesSaf(f)) {
+            task("جاري التحضير…", { Prog.begin(0L); SafFs.toCache(f) }) { c -> open(c, listOf(c)) }
+            return
+        }
         when (FS.kindOf(f.extension.lowercase())) {
             Kind.IMAGE -> {
                 val imgs = siblings.filter { FS.kindOf(it.extension.lowercase()) == Kind.IMAGE }.map { it.path }
@@ -224,10 +228,28 @@ object Ctl {
         task(if (cut) "جاري النقل…" else "جاري النسخ…", {
             Prog.begin(if (cut) 0L else items.sumOf { FS.sizeOf(it) })
             val touched = ArrayList<String>()
+            val destSaf = SafFs.usesSaf(dest)
             for (f in items) {
-                val r = if (cut) FS.move(f, dest) else FS.copy(f, dest)
-                touched.add(r.path)
-                if (cut) touched.add(f.path)
+                val srcSaf = SafFs.usesSaf(f)
+                if (!srcSaf && !destSaf) {
+                    val r = if (cut) FS.move(f, dest) else FS.copy(f, dest)
+                    touched.add(r.path)
+                    if (cut) touched.add(f.path)
+                } else if (srcSaf && !destSaf) {
+                    touched.add(SafFs.copyOut(f, dest).path)
+                    if (cut && !SafFs.delete(f)) throw IOException("تعذر حذف الأصل ${f.name}")
+                } else if (!srcSaf) {
+                    SafFs.copyIn(f, dest)
+                    if (cut) { f.deleteRecursively(); touched.add(f.path) }
+                } else {
+                    val tmp = File(app.cacheDir, "safpaste/" + System.nanoTime()).also { it.mkdirs() }
+                    try {
+                        SafFs.copyIn(SafFs.copyOut(f, tmp), dest)
+                    } finally {
+                        tmp.deleteRecursively()
+                    }
+                    if (cut && !SafFs.delete(f)) throw IOException("تعذر حذف الأصل ${f.name}")
+                }
             }
             touched
         }) { touched ->
@@ -237,17 +259,34 @@ object Ctl {
         }
     }
 
+    /** مشاركة: ملفات Android/data بتتنسخ مؤقتًا للكاش الأول */
+    fun shareFiles(files: List<File>) {
+        if (files.none { SafFs.usesSaf(it) }) { FS.share(app, files); return }
+        task("جاري التحضير…", {
+            Prog.begin(0L)
+            files.mapNotNull { f -> if (SafFs.usesSaf(f)) (if (SafFs.isDir(f)) null else SafFs.toCache(f)) else f }
+        }) { fs -> FS.share(app, fs) }
+    }
+
+    fun openWith(f: File) {
+        if (!SafFs.usesSaf(f)) { FS.openFile(app, f, true); return }
+        task("جاري التحضير…", { Prog.begin(0L); SafFs.toCache(f) }) { c -> FS.openFile(app, c, true) }
+    }
+
     fun askDelete(files: List<File>, dlg: DlgState) {
         if (Prefs.confirmDelete) dlg.del = files else delete(files)
     }
 
     fun delete(files: List<File>) {
-        val permanent = !Prefs.useTrash
+        val saf = files.filter { SafFs.usesSaf(it) }
+        val norm = files.filter { f -> saf.none { it.path == f.path } }
+        val permanent = !Prefs.useTrash || norm.isEmpty()
         task(if (permanent) "جاري الحذف…" else "جاري النقل للسلة…", {
             val paths = files.map { it.path }
             val ids = ArrayList<String>()
-            for (f in files) {
-                if (permanent) {
+            for (f in saf) if (!SafFs.delete(f)) throw IOException("تعذر حذف ${f.name}")
+            for (f in norm) {
+                if (!Prefs.useTrash) {
                     if (!f.deleteRecursively()) throw IOException("تعذر حذف ${f.name}")
                 } else {
                     ids.add(TrashBin.put(f))
@@ -255,7 +294,7 @@ object Ctl {
             }
             paths to ids
         }) { (paths, ids) ->
-            FS.scan(app, paths)
+            FS.scan(app, norm.map { it.path })
             paths.forEach { Prefs.favorites.remove(it) }
             Prefs.save()
             if (permanent) toast("تم الحذف")
@@ -276,6 +315,11 @@ object Ctl {
         val n = name.trim()
         if (n.isEmpty() || n.contains('/')) {
             toast("الاسم مش مظبوط")
+            return
+        }
+        if (SafFs.usesSaf(f)) {
+            if (n != f.name && SafFs.exists(File(f.parentFile, n))) { toast("فيه ملف بنفس الاسم"); return }
+            task("جاري التغيير…", { SafFs.rename(f, n) }) { ok -> toast(if (ok) "تم تغيير الاسم" else "تعذر تغيير الاسم") }
             return
         }
         val t = File(f.parentFile, n)
@@ -303,6 +347,11 @@ object Ctl {
             toast("الاسم مش مظبوط")
             return
         }
+        if (SafFs.usesSaf(dir)) {
+            if (SafFs.exists(File(dir, n))) { toast("فيه عنصر بنفس الاسم"); return }
+            task("جاري الإنشاء…", { SafFs.mkdir(dir, n) }) { ok -> toast(if (ok) "تم إنشاء المجلد" else "تعذر إنشاء المجلد") }
+            return
+        }
         val t = File(dir, n)
         if (t.exists()) toast("فيه عنصر بنفس الاسم") else if (t.mkdirs()) toast("تم إنشاء المجلد") else toast("تعذر إنشاء المجلد")
         bump()
@@ -312,6 +361,11 @@ object Ctl {
         val n = name.trim()
         if (n.isEmpty() || n.contains('/')) {
             toast("الاسم مش مظبوط")
+            return
+        }
+        if (SafFs.usesSaf(dir)) {
+            if (SafFs.exists(File(dir, n))) { toast("فيه عنصر بنفس الاسم"); return }
+            task("جاري الإنشاء…", { SafFs.newFile(dir, n) }) { ok -> toast(if (ok) "تم إنشاء الملف" else "تعذر إنشاء الملف") }
             return
         }
         val t = File(dir, n)
@@ -327,6 +381,7 @@ object Ctl {
     }
 
     fun zip(files: List<File>, name: String, pwd: String = "", fmt: Int = 0) {
+        if (files.any { SafFs.usesSaf(it) }) { toast("الضغط مش متاح جوه Android/data - انسخ الملفات لمكان تاني الأول"); return }
         val parent = files.firstOrNull()?.parentFile ?: return
         var n = name.trim().ifEmpty { "archive" }
         val ext = listOf(".zip", ".7z", ".tar.gz")[fmt.coerceIn(0, 2)]
@@ -435,6 +490,7 @@ object Ctl {
     }
 
     fun batchRename(files: List<File>, pattern: String, start: Int, keepExt: Boolean) {
+        if (files.any { SafFs.usesSaf(it) }) { toast("إعادة التسمية الجماعية مش متاحة جوه Android/data"); return }
         if (files.isEmpty() || pattern.isBlank()) { toast("اكتب نمط الاسم"); return }
         val width = pattern.count { it == '#' }.coerceAtLeast(1)
         val plan = files.mapIndexed { i, f ->
