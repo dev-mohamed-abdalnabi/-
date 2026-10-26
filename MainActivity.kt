@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -196,7 +197,15 @@ fun Shell() {
                 AnimatedVisibility(
                     overlay != null, enter = slideInVertically { it / 3 } + fadeIn(), exit = fadeOut()
                 ) {
-                    Box(Modifier.fillMaxSize().background(cs.surface)) {
+                    // الـ overlay لازم يبلع كل اللمسات؛ غير كده (خصوصًا مع VideoView اللي بيرجّع false)
+                    // اللمسة بتعدّي للشاشة اللي وراه وتشغّل عناصرها.
+                    Box(
+                        Modifier.fillMaxSize().background(cs.surface).pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                            }
+                        }
+                    ) {
                         when (val o = overlay) {
                             is Overlay.Collection -> CollectionScreen(o.kind, d)
                             is Overlay.Favorites -> FavoritesScreen(d)

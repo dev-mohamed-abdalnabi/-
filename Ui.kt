@@ -475,6 +475,7 @@ fun rememberAutoFocus(): FocusRequester {
 fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () -> Unit, onShare: () -> Unit,
                  onZip: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit,
                  onRename: () -> Unit, onInvert: () -> Unit, onFav: () -> Unit, onTab: () -> Unit,
+                 canOpenWith: Boolean = false, onOpenWith: () -> Unit = {},
                  modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     var more by remember { mutableStateOf(false) }
@@ -510,13 +511,16 @@ fun SelectionBar(count: Int, onAll: () -> Unit, onCopy: () -> Unit, onCut: () ->
                 }
                 DropdownMenu(more, { more = false }) {
                     @Composable
-                    fun mi(t: String, ic: ImageVector, a: () -> Unit) = DropdownMenuItem(
-                        { Text(t) }, { more = false; a() }, leadingIcon = { Icon(ic, null, Modifier.size(20.dp)) }
+                    fun mi(t: String, ic: ImageVector, enabled: Boolean = true, a: () -> Unit) = DropdownMenuItem(
+                        { Text(t) }, { more = false; a() }, enabled = enabled,
+                        leadingIcon = { Icon(ic, null, Modifier.size(20.dp)) }
                     )
-                    mi("تحديد عكسي", Ic.Sort, onInvert)
-                    mi("إعادة تسمية جماعية", Ic.Edit, onRename)
-                    mi("إضافة للمفضلة", Ic.StarFill, onFav)
-                    mi("فتح المجلد في تاب جديد", Ic.Folder, onTab)
+                    // "فتح بتطبيق تاني" بيشتغل مع ملف واحد بس (ACTION_VIEW مبيدعمش أكتر من ملف)
+                    mi(if (canOpenWith) "فتح بتطبيق تاني" else "فتح بتطبيق تاني (اختار ملف واحد)", Ic.File, canOpenWith, onOpenWith)
+                    mi("تحديد عكسي", Ic.Sort, true, onInvert)
+                    mi("إعادة تسمية جماعية", Ic.Edit, true, onRename)
+                    mi("إضافة للمفضلة", Ic.StarFill, true, onFav)
+                    mi("فتح المجلد في تاب جديد", Ic.Folder, true, onTab)
                 }
             }
         }

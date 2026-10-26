@@ -168,6 +168,13 @@ fun ImageViewer(o: Overlay.Images) {
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 12.dp, vertical = 6.dp)
             )
+            Text(
+                "فتح بتطبيق تاني", color = Color.White, style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f))
+                    .clickable { Ctl.openWith(File(o.paths[pager.currentPage])) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            )
             IconButton(
                 { val c = pager.currentPage; rot[c] = ((rot[c] ?: 0) + 90) % 360 },
                 Modifier.padding(start = 8.dp).size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f))
